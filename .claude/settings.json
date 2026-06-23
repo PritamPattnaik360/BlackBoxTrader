@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create *)",
+      "Bash(npm init *)",
+      "Bash(python -m pip install -e \".[dev]\" --quiet)",
+      "Bash(python -m pip install fastapi \"uvicorn[standard]\" pydantic-settings \"sqlalchemy[asyncio]\" alembic aiosqlite asyncpg \"redis[hiredis]\" apscheduler alpaca-py yfinance httpx websockets cachetools python-dotenv pyarrow praw --quiet)",
+      "Bash(python -m pip install \"pandas-ta>=0.3.14b\" PyPortfolioOpt --quiet)",
+      "Bash(python -m pip install torch --index-url https://download.pytorch.org/whl/cpu --quiet)",
+      "Bash(python -m pip install transformers --quiet)",
+      "Bash(python -c \"from app.main import app; print\\('Backend imports OK'\\)\")",
+      "Bash(python -m alembic upgrade head)",
+      "Bash(npm run *)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import fastapi, uvicorn, sqlalchemy, alembic, aiosqlite; print\\('Core deps OK'\\)\")",
+      "Bash(python -c \"import numpy, pandas, yfinance, apscheduler, alpaca; print\\('Trading deps OK'\\)\")",
+      "PowerShell($v = [System.Environment]::GetEnvironmentVariable\\(\"ALPACA_API_KEY\"\\); if \\($null -eq $v\\) { \"ALPACA_API_KEY: not set in system env\" } else { \"ALPACA_API_KEY: set in system env, length=$\\($v.Length\\)\" })",
+      "PowerShell(python -c \"import ollama; print\\('ollama installed'\\)\" 2>&1)",
+      "PowerShell(python -c \"import llama_cpp; print\\('llama_cpp installed'\\)\" 2>&1)",
+      "Bash(curl -s http://localhost:8000/api/v1/portfolio)",
+      "Bash(curl -s http://localhost:8000/api/v1/settings/mode)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/settings/autonomous -H \"Content-Type: application/json\" -d '{\"enabled\": true, \"confirm\": false}')",
+      "Bash(curl -s http://localhost:8000/openapi.json)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(p\\) for p in d.get\\('paths',{}\\)]\")",
+      "Bash(python -m app.main)",
+      "Bash(python -c \"import app.main\")"
+    ]
+  }
+}
