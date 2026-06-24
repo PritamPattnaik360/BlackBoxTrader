@@ -7,6 +7,7 @@ export const submitBacktest = (req: {
   end_date: string
   initial_capital?: number
   strategy_name?: string
+  params?: Record<string, unknown>
 }) => api.post<{ run_id: number; status: string }>('/backtest', req).then((r) => r.data)
 
 export const getBacktestResult = (runId: number) =>

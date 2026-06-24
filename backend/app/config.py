@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     finbert_batch_size: int = 32
 
     # Scheduler intervals (seconds)
-    signal_scan_interval: int = 900      # 15 minutes
+    signal_scan_interval: int = 300      # 5 minutes (intraday)
     portfolio_sync_interval: int = 60    # 1 minute
     order_poll_interval: int = 30        # 30 seconds
 

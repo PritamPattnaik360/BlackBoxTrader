@@ -21,7 +21,7 @@ async def fetch_news(ticker: str) -> list[dict]:
 async def _fetch_yfinance_news(ticker: str) -> list[dict]:
     """
     yfinance Ticker.news returns recent articles with no API key.
-    Each item has: title, publisher, providerPublishTime (unix ts), link.
+    Handles both the legacy flat format and the newer nested content format.
     """
     try:
         import yfinance as yf
@@ -31,13 +31,36 @@ async def _fetch_yfinance_news(ticker: str) -> list[dict]:
             return []
         results = []
         for item in news[:20]:
-            title = item.get("title") or ""
+            # New yfinance format: data nested under "content"
+            content = item.get("content") or {}
+            title = (
+                item.get("title")
+                or content.get("title")
+                or content.get("headline")
+                or ""
+            )
             if not title:
                 continue
-            pub_ts = item.get("providerPublishTime") or item.get("published_at")
+            pub_ts = (
+                item.get("providerPublishTime")
+                or item.get("published_at")
+                or content.get("pubDate")
+                or content.get("publishedAt")
+            )
+            source = (
+                item.get("publisher")
+                or (content.get("provider") or {}).get("displayName")
+                or "yfinance"
+            )
+            # Convert ISO string timestamps to unix float
+            if isinstance(pub_ts, str):
+                try:
+                    pub_ts = datetime.fromisoformat(pub_ts.replace("Z", "+00:00")).timestamp()
+                except Exception:
+                    pub_ts = None
             results.append({
                 "title": title,
-                "source": item.get("publisher", "yfinance"),
+                "source": source,
                 "published_at": float(pub_ts) if pub_ts else "",
                 "ticker": ticker,
             })

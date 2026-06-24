@@ -3,6 +3,16 @@ import { getPortfolio, getPortfolioHistory } from '../api/portfolio'
 import { useTradingStore } from '../store/tradingStore'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import dayjs from 'dayjs'
+import { Info } from 'lucide-react'
+
+function ExplainBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3 bg-blue-950/30 border border-blue-900/50 rounded-xl px-4 py-3 text-xs text-gray-400 leading-relaxed">
+      <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+      <div>{children}</div>
+    </div>
+  )
+}
 
 export default function Portfolio() {
   const { data: portfolio } = useQuery({ queryKey: ['portfolio'], queryFn: getPortfolio, refetchInterval: 30000 })
@@ -14,7 +24,14 @@ export default function Portfolio() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Portfolio</h1>
+      <div>
+        <h1 className="text-xl font-semibold mb-3">Portfolio</h1>
+        <ExplainBox>
+          Your Alpaca paper-trading account snapshot. The <strong className="text-gray-300">Equity Curve</strong> shows how your total account value has changed over time — pulled directly from Alpaca's portfolio history endpoint.
+          <strong className="text-gray-300"> Live Price</strong> in the positions table is updated in real time via WebSocket; <strong className="text-gray-300">Unrealized P&L</strong> recalculates every tick.
+          Positions are sized by the risk engine: 1% of equity risked per trade, divided by 2× ATR.
+        </ExplainBox>
+      </div>
 
       {/* Equity curve */}
       {history && history.length > 1 && (

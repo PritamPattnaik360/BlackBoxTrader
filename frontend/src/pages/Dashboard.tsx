@@ -3,8 +3,17 @@ import { getPortfolio } from '../api/portfolio'
 import { getSignals } from '../api/signals'
 import { getOrders } from '../api/orders'
 import { useTradingStore } from '../store/tradingStore'
-import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react'
+import { TrendingUp, DollarSign, Activity, Info } from 'lucide-react'
 import dayjs from 'dayjs'
+
+function ExplainBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3 bg-blue-950/30 border border-blue-900/50 rounded-xl px-4 py-3 text-xs text-gray-400 leading-relaxed">
+      <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+      <div>{children}</div>
+    </div>
+  )
+}
 
 function PnLCard({ label, value, pct }: { label: string; value: number; pct?: number }) {
   const positive = value >= 0
@@ -35,7 +44,14 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Dashboard</h1>
+      <div>
+        <h1 className="text-xl font-semibold mb-3">Dashboard</h1>
+        <ExplainBox>
+          Live overview of your paper-trading account. <strong className="text-gray-300">Portfolio Value</strong> and <strong className="text-gray-300">Open Positions</strong> refresh every 30 seconds via Alpaca.
+          <strong className="text-gray-300"> Recent Signals</strong> are the latest AI decisions from the scanner (NLP + quant).
+          When <strong className="text-gray-300">Autopilot</strong> is on (Settings), signals above ±0.30 automatically place orders — you'll see them appear in Recent Orders within seconds.
+        </ExplainBox>
+      </div>
 
       {/* Portfolio error banner */}
       {portfolioError && (
@@ -71,7 +87,7 @@ export default function Dashboard() {
             <TrendingUp size={14} /> Open Positions
           </div>
           <div className="divide-y divide-gray-800">
-            {positions.slice(0, 5).map((p) => {
+            {positions.slice(0, 5).map((p: any) => {
               const live = prices[p.ticker]?.close ?? p.current_price
               const pnl = (live - p.avg_entry_price) * p.qty
               return (

@@ -2,7 +2,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getOrders, placeOrder, cancelOrder } from '../api/orders'
 import dayjs from 'dayjs'
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { X, Info } from 'lucide-react'
+
+function ExplainBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3 bg-blue-950/30 border border-blue-900/50 rounded-xl px-4 py-3 text-xs text-gray-400 leading-relaxed">
+      <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+      <div>{children}</div>
+    </div>
+  )
+}
 
 export default function Orders() {
   const qc = useQueryClient()
@@ -19,7 +28,16 @@ export default function Orders() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Orders</h1>
+      <div>
+        <h1 className="text-xl font-semibold mb-3">Orders</h1>
+        <ExplainBox>
+          All orders placed on your Alpaca paper account, auto-refreshed every 15 seconds.
+          <strong className="text-gray-300"> Auto</strong> orders are placed by the bot when Autopilot is enabled and a signal crosses the ±0.30 threshold.
+          <strong className="text-gray-300"> Manual</strong> orders let you bypass the AI and trade any ticker directly — useful for testing or overriding a position.
+          You can cancel any pending or accepted order using the <strong className="text-gray-300">✕</strong> button before it fills.
+          All orders are <strong className="text-gray-300">market orders</strong> submitted at the next available price.
+        </ExplainBox>
+      </div>
 
       {/* Manual order form */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">

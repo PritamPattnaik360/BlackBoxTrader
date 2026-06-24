@@ -1,10 +1,19 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getTradingMode, setTradingMode, getRiskSettings, updateRiskSettings, getWatchlist, addToWatchlist, removeFromWatchlist } from '../api/settings'
 import { useState } from 'react'
-import { Plus, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, AlertTriangle, Info } from 'lucide-react'
 import AdaptivePanel from '../components/adaptive/AdaptivePanel'
 import AutoTradeStatus from '../components/autonomous/AutoTradeStatus'
 import LlmStatusPanel from '../components/advisor/LlmStatusPanel'
+
+function ExplainBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3 bg-blue-950/30 border border-blue-900/50 rounded-xl px-4 py-3 text-xs text-gray-400 leading-relaxed">
+      <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+      <div>{children}</div>
+    </div>
+  )
+}
 
 export default function Settings() {
   const qc = useQueryClient()
@@ -42,11 +51,23 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <h1 className="text-xl font-semibold">Settings</h1>
+      <div>
+        <h1 className="text-xl font-semibold mb-3">Settings</h1>
+        <ExplainBox>
+          Control how the bot behaves. <strong className="text-gray-300">Autopilot</strong> is the on/off switch for autonomous trading — turn it on and the bot will automatically buy and sell based on AI signals. It resets to OFF every time the backend restarts, so re-enable it after each restart.
+          <strong className="text-gray-300"> Watchlist</strong> defines which stocks the scanner analyzes every 5 minutes.
+          <strong className="text-gray-300"> Risk Parameters</strong> set position sizing and kill-switch thresholds.
+          <strong className="text-gray-300"> Paper mode</strong> (default) uses fake money via Alpaca's paper trading sandbox — safe to experiment with.
+        </ExplainBox>
+      </div>
 
       {/* Autonomous trading — primary feature */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
-        <div className="text-sm font-medium mb-4">Auto Pilot</div>
+        <div className="text-sm font-medium mb-1">Auto Pilot</div>
+        <p className="text-xs text-gray-500 mb-4">
+          When ON, the bot automatically places orders whenever a signal exceeds ±0.30. Scans run every 5 min during NYSE hours.
+          <span className="text-yellow-500 ml-1">⚠ Resets to OFF on every backend restart — re-enable after restarting.</span>
+        </p>
         <AutoTradeStatus />
       </div>
 
@@ -108,7 +129,10 @@ export default function Settings() {
 
       {/* Watchlist */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
-        <div className="text-sm font-medium mb-4">Watchlist</div>
+        <div className="text-sm font-medium mb-1">Watchlist</div>
+        <p className="text-xs text-gray-500 mb-4">
+          Tickers the AI scans every 5 minutes. Add any NYSE/NASDAQ stock. The scanner fetches live news + price data for each ticker every cycle.
+        </p>
         <div className="flex gap-2 mb-3">
           <input
             className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm uppercase focus:outline-none focus:border-blue-500"
@@ -152,7 +176,10 @@ export default function Settings() {
 
       {/* Risk settings */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
-        <div className="text-sm font-medium mb-4">Risk Parameters</div>
+        <div className="text-sm font-medium mb-1">Risk Parameters</div>
+        <p className="text-xs text-gray-500 mb-4">
+          Position size = (equity × risk_per_trade_pct) ÷ (2 × ATR). Max drawdown halt and daily loss halt are kill switches that pause all trading if breached.
+        </p>
         <div className="grid grid-cols-2 gap-4">
           {risk && Object.entries(risk).map(([key, value]) => (
             <div key={key}>

@@ -43,6 +43,18 @@ def get_ohlcv(ticker: str, period: str = "1y", interval: str = "1d") -> pd.DataF
     return df
 
 
+def get_intraday_5m(ticker: str) -> pd.DataFrame:
+    """Fetch today's 5-minute bars. Never cached — always fresh."""
+    df = yf.download(ticker, period="1d", interval="5m", progress=False, auto_adjust=True)
+    if df.empty:
+        return df
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [str(c[0]).lower() for c in df.columns]
+    else:
+        df.columns = [str(c).lower() for c in df.columns]
+    return df
+
+
 def get_options_chain(ticker: str, expiry: str | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     t = yf.Ticker(ticker)
     dates = t.options

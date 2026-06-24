@@ -1,7 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getSignals, triggerScan } from '../api/signals'
 import dayjs from 'dayjs'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Info } from 'lucide-react'
+
+function ExplainBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3 bg-blue-950/30 border border-blue-900/50 rounded-xl px-4 py-3 text-xs text-gray-400 leading-relaxed">
+      <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+      <div>{children}</div>
+    </div>
+  )
+}
 
 export default function Signals() {
   const qc = useQueryClient()
@@ -10,16 +19,24 @@ export default function Signals() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">NLP Signals</h1>
-        <button
-          onClick={() => scan.mutate()}
-          disabled={scan.isPending}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-sm rounded-lg disabled:opacity-50"
-        >
-          <RefreshCw size={14} className={scan.isPending ? 'animate-spin' : ''} />
-          Scan Now
-        </button>
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-xl font-semibold">NLP Signals</h1>
+          <button
+            onClick={() => scan.mutate()}
+            disabled={scan.isPending}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-sm rounded-lg disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={scan.isPending ? 'animate-spin' : ''} />
+            Scan Now
+          </button>
+        </div>
+        <ExplainBox>
+          The AI scans every watchlist ticker every <strong className="text-gray-300">5 minutes</strong> during NYSE hours (9:30–16:00 ET).
+          Each signal is a <strong className="text-gray-300">composite score from −1 to +1</strong> blending FinBERT news sentiment (NLP), VWAP/ORB intraday patterns, 12-month momentum, Bollinger Band mean-reversion, and RSI/MACD technicals.
+          Scores above <strong className="text-gray-300">+0.30 = BUY</strong>, below <strong className="text-gray-300">−0.30 = SELL</strong>.
+          The 5 component bars show each factor's individual contribution. Hover "Scan Now" to trigger a manual scan outside the schedule.
+        </ExplainBox>
       </div>
 
       <div className="bg-gray-900 rounded-xl border border-gray-800">

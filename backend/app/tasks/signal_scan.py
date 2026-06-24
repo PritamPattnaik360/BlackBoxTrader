@@ -85,13 +85,24 @@ async def run_signal_scan():
                 db.add(db_signal)
                 await db.commit()
 
-            logger.info(
-                f"{ticker}: nlp={nlp.composite_score:+.3f} "
-                f"mom={quant.momentum_score:+.3f} "
-                f"mr={quant.mean_reversion_score:+.3f} "
-                f"tech={quant.technical_score:+.3f} "
-                f"→ combined={quant.combined_score:+.3f} [{quant.direction}]"
-            )
+            if quant.intraday_active:
+                logger.info(
+                    f"{ticker}: intraday={quant.intraday_score:+.3f} "
+                    f"nlp={nlp.composite_score:+.3f} "
+                    f"mom={quant.momentum_score:+.3f} "
+                    f"→ combined={quant.combined_score:+.3f} [{quant.direction}]"
+                    f" [VWAP={quant.components.get('intraday_vwap', 0):+.3f}"
+                    f" ORB={quant.components.get('intraday_orb', 0):+.3f}"
+                    f" RVOL={quant.components.get('rvol', 1):.2f}x]"
+                )
+            else:
+                logger.info(
+                    f"{ticker}: nlp={nlp.composite_score:+.3f} "
+                    f"mom={quant.momentum_score:+.3f} "
+                    f"mr={quant.mean_reversion_score:+.3f} "
+                    f"tech={quant.technical_score:+.3f} "
+                    f"→ combined={quant.combined_score:+.3f} [{quant.direction}]"
+                )
 
             # ── Autonomous execution gate ──────────────────────────────────
             if autonomous and market_open and quant.direction != "HOLD":

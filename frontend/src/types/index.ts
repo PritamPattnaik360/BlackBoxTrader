@@ -49,6 +49,9 @@ export interface BacktestResult {
     exit_price: number
     qty: number
     pnl: number
+    ticker?: string
+    side?: string
+    exit_reason?: string
   }> | null
 }
 
