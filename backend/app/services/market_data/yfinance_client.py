@@ -3,16 +3,47 @@ import pandas as pd
 from pathlib import Path
 import os
 
-CACHE_DIR = Path(__file__).parents[5] / "data" / "cache"
+CACHE_DIR = Path(__file__).parents[4] / "data" / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_snapshot(ticker: str) -> dict:
+    """
+    Fetch current price with multiple fallbacks.
+    fast_info.last_price is unreliable in newer yfinance — falls back to
+    previous_close then 1-min history then daily history so price is
+    almost never None.
+    """
     t = yf.Ticker(ticker)
     info = t.fast_info
+
+    price = getattr(info, "last_price", None)
+
+    # Fallback 1: previous close (always available, even after hours)
+    if not price:
+        price = getattr(info, "previous_close", None)
+
+    # Fallback 2: last bar from 1-min intraday history
+    if not price:
+        try:
+            hist = t.history(period="1d", interval="1m", auto_adjust=True)
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+        except Exception:
+            pass
+
+    # Fallback 3: last daily close
+    if not price:
+        try:
+            hist = t.history(period="5d", auto_adjust=True)
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+        except Exception:
+            pass
+
     return {
         "ticker": ticker,
-        "price": getattr(info, "last_price", None),
+        "price": float(price) if price else None,
         "open": getattr(info, "open", None),
         "high": getattr(info, "day_high", None),
         "low": getattr(info, "day_low", None),

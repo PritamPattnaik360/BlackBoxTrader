@@ -92,7 +92,28 @@ async def execute_signal(
     snapshot = get_snapshot(signal.ticker)
     price    = snapshot.get("price")
     if not price or price <= 0:
-        result.update(action="skip", reason="Could not fetch current price")
+        result.update(action="skip", reason="Could not fetch current price — yfinance returned None")
+        logger.warning(f"Price fetch failed for {signal.ticker} — snapshot={snapshot}")
+        return result
+
+    side = "buy" if signal.direction == "BUY" else "sell"
+
+    # ── Position guard ────────────────────────────────────────────────────────
+    # Fetch live positions once (cheap Alpaca call) so we never short-sell
+    # on a paper account and never double-buy a ticker we already hold.
+    try:
+        from app.services.trading_engine import broker
+        live_positions = {p["ticker"] for p in broker.get_positions()}
+    except Exception as e:
+        logger.warning(f"Could not fetch positions for guard check: {e} — proceeding")
+        live_positions = set()
+
+    if side == "buy" and signal.ticker in live_positions:
+        result.update(action="skip", reason="Already holding position — skipping duplicate BUY")
+        return result
+
+    if side == "sell" and signal.ticker not in live_positions:
+        result.update(action="skip", reason="No position to sell — skipping SELL (no short-selling)")
         return result
 
     atr      = stop_loss.calculate_atr(signal.ticker)
@@ -101,13 +122,15 @@ async def execute_signal(
         else position_sizer.fixed_fraction_size(equity, price, risk_pct=risk_pct)
     qty = position_sizer.clamp_to_max(qty, price, equity)
 
+    if qty <= 0:
+        result.update(action="skip", reason="Position sizer returned 0 shares")
+        return result
+
     notional = qty * price
     if not portfolio_limits.check_position_size(notional, equity):
         result.update(action="skip",
                       reason=f"Position ${notional:.0f} exceeds max {settings.max_position_pct:.0%} of equity")
         return result
-
-    side = "buy" if signal.direction == "BUY" else "sell"
 
     if _dry_run:
         logger.info(

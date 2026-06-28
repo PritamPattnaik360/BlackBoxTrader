@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     newsapi_key: str = ""
     gnews_api_key: str = ""
 
-    # NLP
-    finbert_model_path: str = "../data/models/finbert"
+    # NLP — absolute path so it works regardless of CWD
+    finbert_model_path: str = str(Path(__file__).parents[2] / "data" / "models" / "finbert")
     finbert_batch_size: int = 32
 
     # Scheduler intervals (seconds)
@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     max_open_positions: int = 20
     default_stop_atr_multiplier: float = 2.0
     options_target_dte: int = 30
+
+    # Autonomous trading — set AUTO_START_AUTONOMOUS=true in .env to enable on boot
+    auto_start_autonomous: bool = False
 
     # Signal thresholds
     buy_signal_threshold: float = 0.3

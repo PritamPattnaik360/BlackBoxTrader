@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import os
 
-CACHE_DIR = Path(__file__).parents[5] / "data" / "cache"
+CACHE_DIR = Path(__file__).parents[4] / "data" / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # yfinance free tier: max 60 days of 5-minute bars

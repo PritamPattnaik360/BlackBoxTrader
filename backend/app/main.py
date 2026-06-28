@@ -9,6 +9,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 
+_DEFAULT_WATCHLIST = [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN",
+    "META", "TSLA", "JPM", "SPY", "QQQ",
+]
+
+
+async def _seed_watchlist_if_empty() -> list[str]:
+    """Populate watchlist with a diversified default set if it has no entries."""
+    from app.db.session import AsyncSessionLocal
+    from app.models.watchlist import Watchlist
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Watchlist).where(Watchlist.is_active == True))
+        existing = [w.ticker for w in result.scalars().all()]
+        if existing:
+            return existing
+        for ticker in _DEFAULT_WATCHLIST:
+            db.add(Watchlist(ticker=ticker, asset_type="stock", is_active=True))
+        await db.commit()
+        logger.info(f"Seeded default watchlist: {_DEFAULT_WATCHLIST}")
+        return _DEFAULT_WATCHLIST
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -32,19 +55,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Adaptive params not loaded (will use defaults): {e}")
 
-    # Start market data stream
+    # Seed default watchlist if empty, then start market data stream
     try:
-        from app.db.session import AsyncSessionLocal
-        from app.models.watchlist import Watchlist
+        tickers = await _seed_watchlist_if_empty()
         from app.services.market_data.feed import start_stream
-        from sqlalchemy import select
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(select(Watchlist).where(Watchlist.is_active == True))
-            tickers = [w.ticker for w in result.scalars().all()]
         if tickers:
             await start_stream(tickers)
     except Exception as e:
         logger.warning(f"Market data stream not started: {e}")
+
+    # Auto-enable autonomous paper trading if configured
+    from app.config import settings
+    if settings.auto_start_autonomous:
+        try:
+            from app.services.trading_engine.executor import enable_autonomous
+            enable_autonomous()
+            logger.info("Auto-start: autonomous paper trading ENABLED")
+        except Exception as e:
+            logger.warning(f"Could not auto-enable autonomous mode: {e}")
 
     # Start scheduler
     try:
