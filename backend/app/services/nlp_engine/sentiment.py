@@ -14,14 +14,17 @@ def _load_pipeline():
         from transformers import pipeline as hf_pipeline
         model_path = Path(settings.finbert_model_path)
         source = str(model_path) if model_path.exists() else "ProsusAI/finbert"
+        import torch
+        device = 0 if torch.cuda.is_available() else -1
+        device_label = f"GPU:{torch.cuda.get_device_name(0)}" if device == 0 else "CPU"
         _pipeline = hf_pipeline(
             "text-classification",
             model=source,
-            device=-1,  # CPU
+            device=device,
             truncation=True,
             max_length=512,
         )
-        logger.info(f"FinBERT loaded from {source}")
+        logger.info(f"FinBERT loaded from {source} on {device_label}")
     except Exception as e:
         logger.error(f"FinBERT load failed: {e} — using dummy scorer")
         _pipeline = None

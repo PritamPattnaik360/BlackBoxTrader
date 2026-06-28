@@ -12,7 +12,7 @@ module.exports = {
       script: 'pm2_launcher.js',
       watch: false,
       autorestart: false,
-      max_memory_restart: '500M',
+      max_memory_restart: '2G',
       kill_timeout: 5000,
       env: {
         PYTHONUNBUFFERED: '1',
@@ -28,7 +28,7 @@ module.exports = {
       interpreter: 'node',
       watch: false,
       autorestart: false,
-      max_memory_restart: '300M',
+      max_memory_restart: '1G',
       kill_timeout: 3000,
       out_file: '../logs/frontend.log',
       error_file: '../logs/frontend-error.log',
