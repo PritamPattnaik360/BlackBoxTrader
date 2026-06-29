@@ -26,8 +26,9 @@ export default function AutoTradeStatus() {
     },
   })
 
-  const autonomous = mode?.autonomous ?? false
-  const isLive     = mode?.trading_mode === 'live'
+  const autonomous   = mode?.autonomous ?? false
+  const isLive       = mode?.trading_mode === 'live'
+  const marketOpen   = mode?.market_open ?? false
 
   function handleToggle() {
     if (!autonomous) {
@@ -51,16 +52,26 @@ export default function AutoTradeStatus() {
             <span className="text-sm font-medium">Autonomous Trading</span>
             {toggle.isPending && <span className="text-xs text-gray-400 animate-pulse">Saving…</span>}
           </div>
-          {/* Toggle switch */}
-          <button
-            onClick={handleToggle}
-            disabled={toggle.isPending}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50
-              ${autonomous ? 'bg-blue-600' : 'bg-gray-600'}`}
-          >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
-              ${autonomous ? 'translate-x-6' : 'translate-x-1'}`} />
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Market status pill */}
+            <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium
+              ${marketOpen
+                ? 'bg-green-900/40 text-green-400 border border-green-700'
+                : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${marketOpen ? 'bg-green-400' : 'bg-gray-600'}`} />
+              {marketOpen ? 'Market Open' : 'Market Closed'}
+            </span>
+            {/* Toggle switch */}
+            <button
+              onClick={handleToggle}
+              disabled={toggle.isPending}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50
+                ${autonomous ? 'bg-blue-600' : 'bg-gray-600'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                ${autonomous ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
         </div>
 
         {/* Error feedback */}
@@ -83,9 +94,11 @@ export default function AutoTradeStatus() {
               {isLive ? '⚠ AUTO PILOT — LIVE (real money)' : 'AUTO PILOT ACTIVE — Paper money'}
             </div>
             <p className="text-xs opacity-80">
-              BlackBoxTrader is scanning signals every 15 min during market hours and
-              submitting orders automatically using the quant model.
-              You can still place manual trades below.
+              BlackBoxTrader scans signals every 5 min.{' '}
+              {marketOpen
+                ? 'Market is open — orders are being submitted automatically. If all signals are neutral, a forced learning trade is placed on the highest-scoring ticker.'
+                : 'Market is closed — signals are generated but no orders are placed. Forced learning trades are suppressed until the market reopens.'}
+              {' '}You can still place manual trades below.
             </p>
           </div>
         ) : (
@@ -95,7 +108,7 @@ export default function AutoTradeStatus() {
               <span className="font-medium text-gray-300">Manual mode — signals only</span>
             </div>
             <p className="text-xs">
-              Signals are generated every 15 min but <strong>no orders are placed automatically</strong>.
+              Signals are generated every 5 min but <strong>no orders are placed automatically</strong>.
               Enable Auto Pilot to let the quant model trade for you.
             </p>
           </div>

@@ -77,6 +77,7 @@ export interface TradingMode {
   execution_live: boolean
   autonomous: boolean
   alpaca_base_url: string
+  market_open: boolean
 }
 
 export interface Order {

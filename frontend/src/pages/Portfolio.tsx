@@ -15,12 +15,13 @@ function ExplainBox({ children }: { children: React.ReactNode }) {
 }
 
 export default function Portfolio() {
-  const { data: portfolio } = useQuery({ queryKey: ['portfolio'], queryFn: getPortfolio, refetchInterval: 30000 })
+  const { data: portfolio, isLoading, isError } = useQuery({ queryKey: ['portfolio'], queryFn: getPortfolio, refetchInterval: 30000 })
   const { data: history } = useQuery({ queryKey: ['portfolioHistory'], queryFn: getPortfolioHistory, refetchInterval: 60000 })
   const prices = useTradingStore((s) => s.prices)
 
-  const positions = portfolio?.positions ?? []
-  const acct = portfolio?.account
+  const positions = (portfolio as any)?.positions ?? []
+  const acct = (portfolio as any)?.account
+  const portfolioError = (portfolio as any)?.error
 
   return (
     <div className="space-y-6">
@@ -32,6 +33,31 @@ export default function Portfolio() {
           Positions are sized by the risk engine: 1% of equity risked per trade, divided by 2× ATR.
         </ExplainBox>
       </div>
+
+      {/* Alpaca connection error */}
+      {(isError || portfolioError) && (
+        <div className="bg-red-900/30 border border-red-700 rounded-lg px-4 py-3 text-sm text-red-300 space-y-1">
+          <div className="font-semibold">Alpaca connection error — no positions can be loaded</div>
+          {portfolioError && <div className="text-xs opacity-80">{portfolioError}</div>}
+          <div className="text-xs text-red-400 mt-1">
+            Check that <code className="bg-red-900/50 px-1 rounded">ALPACA_API_KEY</code> and{' '}
+            <code className="bg-red-900/50 px-1 rounded">ALPACA_SECRET_KEY</code> are set in{' '}
+            <code className="bg-red-900/50 px-1 rounded">backend/.env</code>, then restart the backend.
+          </div>
+        </div>
+      )}
+
+      {/* Autonomous mode reminder when no positions and no error */}
+      {!isLoading && !portfolioError && !isError && positions.length === 0 && (
+        <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg px-4 py-3 text-sm text-yellow-300">
+          <div className="font-semibold mb-1">No open positions</div>
+          <div className="text-xs text-yellow-400">
+            Alpaca is connected but your paper account has no positions yet. Make sure{' '}
+            <strong>Auto Pilot is ON</strong> in Settings and market hours are active (Mon–Fri 9:30–16:00 ET).
+            The system will place its first trade on the next scan cycle.
+          </div>
+        </div>
+      )}
 
       {/* Equity curve */}
       {history && history.length > 1 && (

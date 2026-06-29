@@ -56,6 +56,9 @@ async def run_signal_scan():
     autonomous  = is_autonomous()
     market_open = _is_market_hours()
 
+    scan_results: list[tuple] = []   # (ticker, nlp, quant) for every successful scan
+    trades_submitted = 0
+
     for ticker in tickers:
         try:
             # ── NLP signal ────────────────────────────────────────────────
@@ -104,6 +107,8 @@ async def run_signal_scan():
                     f"→ combined={quant.combined_score:+.3f} [{quant.direction}]"
                 )
 
+            scan_results.append((ticker, nlp, quant))
+
             # ── Autonomous execution gate ──────────────────────────────────
             if autonomous and market_open and quant.direction != "HOLD":
                 # Build a minimal CompositeSignal using the combined score
@@ -125,7 +130,10 @@ async def run_signal_scan():
                     source="auto",
                     quant_score=quant.combined_score,
                 )
-                logger.info(f"Auto-execute {ticker}: {exec_result.get('action')} ({exec_result.get('reason', '')})")
+                action = exec_result.get("action")
+                logger.info(f"Auto-execute {ticker}: {action} ({exec_result.get('reason', '')})")
+                if action in ("submitted", "dry_run"):
+                    trades_submitted += 1
 
             elif autonomous and not market_open and quant.direction != "HOLD":
                 logger.info(f"Market closed — deferring {ticker} [{quant.direction}]")
@@ -133,8 +141,47 @@ async def run_signal_scan():
         except Exception as e:
             logger.error(f"Signal scan error for {ticker}: {e}", exc_info=True)
 
+    # ── Mandatory learning trade ───────────────────────────────────────────────
+    # If autonomous mode is on, the market is open, and the normal signal gate
+    # let nothing through (all HOLD), force exactly one trade on the ticker with
+    # the highest absolute combined score so the RL system always receives
+    # outcome data and can start adapting its thresholds.
+    if autonomous and market_open and trades_submitted == 0 and scan_results:
+        from app.services.nlp_engine.aggregator import CompositeSignal
+        from datetime import timezone
+
+        best_ticker, best_nlp, best_quant = max(
+            scan_results, key=lambda x: abs(x[2].combined_score)
+        )
+        forced_direction = "BUY" if best_quant.combined_score >= 0 else "SELL"
+        logger.warning(
+            f"[LEARNING] No orders placed this scan — forcing mandatory "
+            f"{forced_direction} on {best_ticker} "
+            f"(score={best_quant.combined_score:+.4f}) to seed RL outcomes"
+        )
+        forced_signal = CompositeSignal(
+            ticker=best_ticker,
+            composite_score=best_quant.combined_score,
+            confidence=best_quant.confidence,
+            direction=forced_direction,
+            source_count=best_nlp.source_count,
+            news_score=best_nlp.news_score,
+            reddit_score=None,
+            raw_headlines=best_nlp.raw_headlines,
+            created_at=datetime.now(timezone.utc),
+        )
+        exec_result = await execute_signal(
+            forced_signal, open_count, equity,
+            source="learning",
+            quant_score=best_quant.combined_score,
+        )
+        logger.info(
+            f"[LEARNING] Forced trade result: {exec_result.get('action')} "
+            f"({exec_result.get('reason', '')})"
+        )
+
     logger.info(
-        f"Scan complete — {len(tickers)} tickers "
+        f"Scan complete — {len(tickers)} tickers, {trades_submitted} submitted "
         f"[autonomous={'ON' if autonomous else 'OFF'}, "
         f"market={'OPEN' if market_open else 'CLOSED'}]"
     )

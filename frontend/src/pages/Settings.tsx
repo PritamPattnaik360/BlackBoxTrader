@@ -93,7 +93,9 @@ export default function Settings() {
         </div>
         <div className="mt-3 text-xs text-gray-500">
           Auto-execution is {mode?.execution_live ? <span className="text-green-400">ENABLED</span> : <span className="text-gray-400">disabled (dry-run)</span>}.
-          Switch to live mode to enable real order submission.
+          {mode?.execution_live
+            ? ' Orders are being submitted to Alpaca.'
+            : ' Enable Auto Pilot above to start submitting paper orders automatically.'}
         </div>
       </div>
 

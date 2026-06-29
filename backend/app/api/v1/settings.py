@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
 from app.config import settings
 from app.services.trading_engine import broker as broker_module
 from app.services.trading_engine.executor import (
@@ -9,6 +11,16 @@ from app.services.trading_engine.executor import (
 )
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+_ET = ZoneInfo("America/New_York")
+
+
+def _market_open() -> bool:
+    now = datetime.now(_ET)
+    if now.weekday() >= 5:
+        return False
+    t = now.time()
+    return dtime(9, 30) <= t <= dtime(16, 0)
 
 
 class ModeSwitch(BaseModel):
@@ -20,10 +32,11 @@ class ModeSwitch(BaseModel):
 @router.get("/mode")
 async def get_mode():
     return {
-        "trading_mode":   settings.trading_mode,
-        "execution_live": not is_dry_run(),
-        "autonomous":     is_autonomous(),
+        "trading_mode":    settings.trading_mode,
+        "execution_live":  not is_dry_run(),
+        "autonomous":      is_autonomous(),
         "alpaca_base_url": settings.alpaca_base_url,
+        "market_open":     _market_open(),
     }
 
 
