@@ -65,6 +65,14 @@ def get_open_orders() -> list[dict]:
     return [_order_to_dict(o) for o in orders]
 
 
+def get_all_orders(limit: int = 100) -> list[dict]:
+    from alpaca.trading.requests import GetOrdersRequest
+    from alpaca.trading.enums import QueryOrderStatus
+    client = get_trading_client()
+    orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.ALL, limit=min(limit, 500)))
+    return [_order_to_dict(o) for o in orders]
+
+
 def submit_market_order(ticker: str, side: str, qty: float) -> dict:
     from alpaca.trading.requests import MarketOrderRequest
     from alpaca.trading.enums import OrderSide, TimeInForce

@@ -19,6 +19,36 @@ class ManualOrderRequest(BaseModel):
 
 @router.get("")
 async def list_orders(limit: int = 100, db: AsyncSession = Depends(get_db)):
+    # Pull from Alpaca (source of truth) so historical orders always appear,
+    # even if the local DB was empty or orders were placed outside this session.
+    try:
+        from app.services.trading_engine.broker import get_all_orders
+        alpaca_orders = get_all_orders(limit)
+        # Build a lookup of local DB rows by alpaca_order_id to enrich with source/quant_score
+        local_result = await db.execute(select(TradeOrder))
+        local_map = {o.alpaca_order_id: o for o in local_result.scalars().all() if o.alpaca_order_id}
+        return [
+            {
+                "id": i,
+                "alpaca_order_id": o["alpaca_order_id"],
+                "ticker": o["ticker"],
+                "side": o["side"],
+                "order_type": o["order_type"],
+                "qty": o["qty"],
+                "status": o["status"],
+                "filled_qty": o["filled_qty"],
+                "filled_avg_price": o["filled_avg_price"],
+                "submitted_at": o["submitted_at"],
+                "filled_at": o["filled_at"],
+                "source": local_map[o["alpaca_order_id"]].source if o["alpaca_order_id"] in local_map else "auto",
+                "quant_score": local_map[o["alpaca_order_id"]].quant_score if o["alpaca_order_id"] in local_map else None,
+            }
+            for i, o in enumerate(alpaca_orders)
+        ]
+    except Exception:
+        pass
+
+    # Fallback: local DB only (e.g. Alpaca not configured / keys missing)
     result = await db.execute(
         select(TradeOrder).order_by(desc(TradeOrder.submitted_at)).limit(limit)
     )
@@ -36,6 +66,8 @@ async def list_orders(limit: int = 100, db: AsyncSession = Depends(get_db)):
             "filled_avg_price": o.filled_avg_price,
             "submitted_at": str(o.submitted_at),
             "filled_at": str(o.filled_at) if o.filled_at else None,
+            "source": o.source,
+            "quant_score": o.quant_score,
         }
         for o in orders
     ]

@@ -39,11 +39,30 @@ Market data for {ticker}:
 - News sentiment (NLP): {nlp:+.3f}
 - Market regime: {regime}
 - Strategy win rate (recent): {win_rate:.1f}%
-
+{trendline_section}
 Synthesize all factors. Scores range from -1 (strong sell) to +1 (strong buy).
 
 Respond with ONLY this JSON:
 {{"direction": "BUY" | "SELL" | "HOLD", "score": <float -1 to 1>, "confidence": <float 0 to 1>}}"""
+
+
+def _build_trendline_section(td: dict | None) -> str:
+    """Format trend line context for the LLM prompt."""
+    if not td or td.get("support_level", 0.0) == 0.0:
+        return ""
+    sup  = td["support_level"]
+    res  = td["resistance_level"]
+    dirn = td["trend_dir"]
+    if td.get("breakout"):
+        action = "BREAKOUT above resistance"
+    elif td.get("breakdown"):
+        action = "BREAKDOWN below support"
+    else:
+        action = "price inside channel"
+    return (
+        f"- Trend lines: support=${sup:.2f}, resistance=${res:.2f}, "
+        f"direction={dirn}, price action={action}\n"
+    )
 
 
 async def compute(
@@ -54,6 +73,7 @@ async def compute(
     technical_score: float,
     regime: str = "normal",
     win_rate: float = 50.0,
+    trendline_data: dict | None = None,
     model: str = DEFAULT_MODEL,
 ) -> float:
     """
@@ -70,6 +90,7 @@ async def compute(
         nlp=nlp_score,
         regime=regime,
         win_rate=win_rate,
+        trendline_section=_build_trendline_section(trendline_data),
     )
 
     try:

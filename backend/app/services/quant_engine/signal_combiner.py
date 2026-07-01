@@ -6,17 +6,19 @@ dominate the score. Outside market hours, the daily swing-trading factors
 take over.
 
 Intraday weights (market open):
-  Intraday composite  40%  — VWAP + ORB + 5-min momentum
-  NLP (news)          20%  — directional news flow
-  Momentum (12-1 mo)  20%  — Jegadeesh-Titman factor
-  Mean reversion      10%  — Bollinger/OU
-  Technical           10%  — RSI + MACD + EMA
+  Intraday composite  36%  — VWAP + ORB + 5-min momentum
+  NLP (news)          18%  — directional news flow
+  Momentum (12-1 mo)  18%  — Jegadeesh-Titman factor
+  Trend lines         10%  — swing pivot support/resistance
+  Mean reversion       9%  — Bollinger/OU
+  Technical            9%  — RSI + MACD + EMA
 
 Daily weights (market closed):
-  NLP                 35%
-  Momentum            30%
-  Mean reversion      20%
-  Technical           15%
+  NLP                 31%
+  Momentum            26%
+  Trend lines         12%
+  Mean reversion      18%
+  Technical           13%
 
 The adaptive engine tunes the buy/sell thresholds that act on the score.
 """
@@ -40,34 +42,38 @@ def _market_is_open() -> bool:
 
 # Weights when LLM is offline (sum = 1.0)
 _WEIGHTS_NO_LLM = {
-    "nlp":            0.35,
-    "momentum":       0.30,
-    "mean_reversion": 0.20,
-    "technical":      0.15,
+    "nlp":            0.31,
+    "momentum":       0.26,
+    "mean_reversion": 0.18,
+    "technical":      0.13,
+    "trendlines":     0.12,
 }
 # Weights when LLM is online — its signal takes 20%, others scale down
 _WEIGHTS_WITH_LLM = {
-    "nlp":            0.28,
-    "momentum":       0.24,
-    "mean_reversion": 0.16,
-    "technical":      0.12,
+    "nlp":            0.25,
+    "momentum":       0.21,
+    "mean_reversion": 0.14,
+    "technical":      0.10,
     "llm":            0.20,
+    "trendlines":     0.10,
 }
 # Intraday weights: VWAP/ORB/momentum on 5-min bars dominate
 _WEIGHTS_INTRADAY = {
-    "intraday":       0.40,
-    "nlp":            0.20,
-    "momentum":       0.20,
-    "mean_reversion": 0.10,
-    "technical":      0.10,
+    "intraday":       0.36,
+    "nlp":            0.18,
+    "momentum":       0.18,
+    "mean_reversion": 0.09,
+    "technical":      0.09,
+    "trendlines":     0.10,
 }
 _WEIGHTS_INTRADAY_LLM = {
-    "intraday":       0.32,
-    "nlp":            0.16,
-    "momentum":       0.16,
-    "mean_reversion": 0.08,
+    "intraday":       0.29,
+    "nlp":            0.14,
+    "momentum":       0.14,
+    "mean_reversion": 0.07,
     "technical":      0.08,
     "llm":            0.20,
+    "trendlines":     0.08,
 }
 
 WEIGHTS = _WEIGHTS_NO_LLM  # exported for UI display; updated dynamically per call
@@ -83,6 +89,7 @@ class QuantAnalysis:
     technical_score:      float
     llm_score:            float    # 0.0 when Ollama not running
     intraday_score:       float    # 0.0 when market closed
+    trendline_score:      float    # swing pivot support/resistance signal
     direction:            str      # BUY | SELL | HOLD
     confidence:           float    # 0-1
     llm_active:           bool
@@ -115,13 +122,19 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
         avg_daily_vol = 0.0
 
     if prices is not None and not prices.empty:
-        mom_score, mr_score, tech_score = await asyncio.gather(
-            asyncio.to_thread(momentum.compute,       prices),
-            asyncio.to_thread(mean_reversion.compute, prices),
-            asyncio.to_thread(technical.compute,      prices),
+        from app.services.quant_engine import trendlines as trendlines_mod
+        mom_score, mr_score, tech_score, tl_result = await asyncio.gather(
+            asyncio.to_thread(momentum.compute,          prices),
+            asyncio.to_thread(mean_reversion.compute,    prices),
+            asyncio.to_thread(technical.compute,         prices),
+            asyncio.to_thread(trendlines_mod.compute,    df_daily, 5, 90),
         )
     else:
         mom_score = mr_score = tech_score = 0.0
+        tl_result = {"score": 0.0, "support_level": 0.0, "resistance_level": 0.0,
+                     "trend_dir": "sideways", "breakout": False, "breakdown": False,
+                     "slope_score": 0.0, "channel_score": 0.0}
+    trendline_score = tl_result["score"]
 
     # ── Intraday signals (market hours only) ─────────────────────────────
     intraday_result = {"combined": 0.0, "vwap": 0.0, "orb": 0.0, "intraday_momentum": 0.0, "rvol": 1.0}
@@ -149,6 +162,7 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
             mean_reversion_score=mr_score,
             technical_score=tech_score,
             regime=regime,
+            trendline_data=tl_result,
         )
     else:
         llm_score = 0.0
@@ -157,21 +171,23 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
     if market_open:
         w = _WEIGHTS_INTRADAY_LLM if llm_online else _WEIGHTS_INTRADAY
         combined = (
-            w["intraday"]       * intraday_score
-            + w["nlp"]          * nlp_score
-            + w["momentum"]     * mom_score
-            + w["mean_reversion"] * mr_score
-            + w["technical"]    * tech_score
-            + w.get("llm", 0.0) * llm_score
+            w["intraday"]           * intraday_score
+            + w["nlp"]              * nlp_score
+            + w["momentum"]         * mom_score
+            + w["mean_reversion"]   * mr_score
+            + w["technical"]        * tech_score
+            + w["trendlines"]       * trendline_score
+            + w.get("llm", 0.0)    * llm_score
         )
     else:
         w = _WEIGHTS_WITH_LLM if llm_online else _WEIGHTS_NO_LLM
         combined = (
-            w["nlp"]            * nlp_score
-            + w["momentum"]     * mom_score
-            + w["mean_reversion"] * mr_score
-            + w["technical"]    * tech_score
-            + w.get("llm", 0.0) * llm_score
+            w["nlp"]                * nlp_score
+            + w["momentum"]         * mom_score
+            + w["mean_reversion"]   * mr_score
+            + w["technical"]        * tech_score
+            + w["trendlines"]       * trendline_score
+            + w.get("llm", 0.0)    * llm_score
         )
 
     combined = max(-1.0, min(1.0, combined))
@@ -191,6 +207,8 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
         active_scores.append(intraday_score)
     if llm_online:
         active_scores.append(llm_score)
+    if trendline_score != 0.0:
+        active_scores.append(trendline_score)
     n_agree    = sum(1 for s in active_scores if (s > 0) == (combined > 0))
     confidence = min(nlp_confidence + (n_agree / len(active_scores)) * 0.3, 1.0)
 
@@ -203,25 +221,32 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
         technical_score=round(tech_score, 4),
         llm_score=round(llm_score, 4),
         intraday_score=round(intraday_score, 4),
+        trendline_score=round(trendline_score, 4),
         llm_active=llm_online,
         intraday_active=intraday_active,
         direction=direction,
         confidence=round(confidence, 4),
         components={
-            "weights":           w,
-            "mode":              "intraday" if market_open else "daily",
-            "nlp":               round(nlp_score, 4),
-            "momentum":          round(mom_score, 4),
-            "mean_reversion":    round(mr_score, 4),
-            "technical":         round(tech_score, 4),
-            "llm":               round(llm_score, 4),
-            "llm_active":        llm_online,
-            "intraday":          round(intraday_score, 4),
-            "intraday_vwap":     round(intraday_result["vwap"], 4),
-            "intraday_orb":      round(intraday_result["orb"], 4),
-            "intraday_momentum": round(intraday_result["intraday_momentum"], 4),
-            "rvol":              round(intraday_result["rvol"], 3),
-            "buy_threshold":     round(buy_thr, 4),
-            "sell_threshold":    round(sell_thr, 4),
+            "weights":                  w,
+            "mode":                     "intraday" if market_open else "daily",
+            "nlp":                      round(nlp_score, 4),
+            "momentum":                 round(mom_score, 4),
+            "mean_reversion":           round(mr_score, 4),
+            "technical":                round(tech_score, 4),
+            "llm":                      round(llm_score, 4),
+            "llm_active":               llm_online,
+            "intraday":                 round(intraday_score, 4),
+            "intraday_vwap":            round(intraday_result["vwap"], 4),
+            "intraday_orb":             round(intraday_result["orb"], 4),
+            "intraday_momentum":        round(intraday_result["intraday_momentum"], 4),
+            "rvol":                     round(intraday_result["rvol"], 3),
+            "trendlines":               round(trendline_score, 4),
+            "trendline_support":        tl_result["support_level"],
+            "trendline_resistance":     tl_result["resistance_level"],
+            "trendline_dir":            tl_result["trend_dir"],
+            "trendline_breakout":       tl_result["breakout"],
+            "trendline_breakdown":      tl_result["breakdown"],
+            "buy_threshold":            round(buy_thr, 4),
+            "sell_threshold":           round(sell_thr, 4),
         },
     )
