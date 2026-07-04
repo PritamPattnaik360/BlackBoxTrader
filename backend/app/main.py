@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -80,6 +81,18 @@ async def lifespan(app: FastAPI):
         start()
     except Exception as e:
         logger.warning(f"Scheduler not started: {e}")
+
+    # Drain the backlog of past signals into training samples immediately
+    async def _seed_training_data():
+        try:
+            from app.tasks.signal_outcome_seeder import run_signal_outcome_seeder
+            n = await run_signal_outcome_seeder()
+            if n:
+                logger.info(f"Startup seeder: generated {n} training sample(s) from signal history")
+        except Exception as e:
+            logger.warning(f"Startup training seeder failed: {e}")
+
+    asyncio.ensure_future(_seed_training_data())
 
     logger.info("BlackBoxTrader ready")
     yield

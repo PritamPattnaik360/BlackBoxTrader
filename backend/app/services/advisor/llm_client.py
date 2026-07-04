@@ -16,8 +16,33 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE = "http://localhost:11434"
+OLLAMA_BASE   = "http://localhost:11434"
 DEFAULT_MODEL = "llama3.2:3b"
+CUSTOM_MODEL  = "blackbox-trader"   # created by scripts/finetune_llm.py
+
+# Cache the active model name so we don't ping Ollama on every signal
+_active_model_cache: str | None = None
+
+
+async def get_active_model() -> str:
+    """
+    Return the best available model: the fine-tuned 'blackbox-trader' if it
+    exists in Ollama, otherwise the base 'llama3.2:3b'.
+    Result is cached for the lifetime of the process.
+    """
+    global _active_model_cache
+    if _active_model_cache is not None:
+        return _active_model_cache
+    models = await list_models()
+    _active_model_cache = CUSTOM_MODEL if any(CUSTOM_MODEL in m for m in models) else DEFAULT_MODEL
+    logger.info("Active LLM model: %s", _active_model_cache)
+    return _active_model_cache
+
+
+def invalidate_model_cache() -> None:
+    """Call this after fine-tuning so the next request re-checks Ollama."""
+    global _active_model_cache
+    _active_model_cache = None
 
 _SYSTEM_PROMPT = """You are BlackBox Advisor, an expert quantitative trading analyst embedded in the BlackBoxTrader platform.
 

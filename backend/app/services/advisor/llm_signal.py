@@ -25,9 +25,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE    = "http://localhost:11434"
-DEFAULT_MODEL  = "llama3.2:3b"
-_TIMEOUT_SECS  = 15   # fast timeout — signal scan should not block
+OLLAMA_BASE   = "http://localhost:11434"
+DEFAULT_MODEL = "llama3.2:3b"
+_TIMEOUT_SECS = 15   # fast timeout — signal scan should not block
 
 _SIGNAL_PROMPT = """\
 You are a quantitative trading model. Given market data, output ONLY valid JSON — no prose, no markdown.
@@ -74,7 +74,7 @@ async def compute(
     regime: str = "normal",
     win_rate: float = 50.0,
     trendline_data: dict | None = None,
-    model: str = DEFAULT_MODEL,
+    model: str | None = None,
 ) -> float:
     """
     Ask the local LLM to synthesize all quant signals into a single score.
@@ -82,6 +82,9 @@ async def compute(
     Returns a float in [-1, 1]. Returns 0.0 if Ollama is unavailable
     or if the response cannot be parsed.
     """
+    from app.services.advisor.llm_client import get_active_model
+    active_model = model or await get_active_model()
+
     prompt = _SIGNAL_PROMPT.format(
         ticker=ticker,
         momentum=momentum_score,
@@ -98,7 +101,7 @@ async def compute(
             r = await client.post(
                 f"{OLLAMA_BASE}/api/generate",
                 json={
-                    "model": model,
+                    "model": active_model,
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",   # Ollama JSON mode — forces valid JSON output
@@ -113,7 +116,7 @@ async def compute(
             data = _parse_json_response(raw)
             score = float(data.get("score", 0.0))
             score = max(-1.0, min(1.0, score))
-            logger.debug(f"LLM signal {ticker}: {data.get('direction')} score={score:+.3f} conf={data.get('confidence', '?')}")
+            logger.debug(f"LLM signal {ticker} [{active_model}]: {data.get('direction')} score={score:+.3f} conf={data.get('confidence', '?')}")
             return score
 
     except httpx.ConnectError:
