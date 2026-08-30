@@ -16,6 +16,7 @@ class Position(Base):
     stop_loss_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     take_profit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     asset_class: Mapped[str] = mapped_column(String(15), default="us_equity")
+    contract_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
     is_open: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

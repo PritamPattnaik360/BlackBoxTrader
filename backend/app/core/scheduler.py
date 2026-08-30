@@ -14,8 +14,8 @@ def start():
 
     scheduler.add_job(run_signal_scan, "interval", seconds=settings.signal_scan_interval, id="signal_scan", replace_existing=True)
     scheduler.add_job(run_portfolio_sync, "interval", seconds=settings.portfolio_sync_interval, id="portfolio_sync", replace_existing=True)
-    # Run a full optimization pass every 6 hours regardless of trade count
-    scheduler.add_job(run_adaptive_optimize, "interval", hours=6, id="adaptive_optimize", replace_existing=True)
+    # Run a full optimization pass every 2 hours regardless of trade count
+    scheduler.add_job(run_adaptive_optimize, "interval", hours=2, id="adaptive_optimize", replace_existing=True)
     # Convert past signals into LLM training samples every 30 minutes
     scheduler.add_job(run_signal_outcome_seeder, "interval", minutes=30, id="signal_seeder", replace_existing=True)
     scheduler.start()

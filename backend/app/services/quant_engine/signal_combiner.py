@@ -195,6 +195,23 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
     buy_thr  = get_param("buy_signal_threshold")
     sell_thr = get_param("sell_signal_threshold")
 
+    # Breakout mode: a confirmed high-volume intraday move (RVOL + ORB/VWAP/
+    # momentum agreeing with the overall score) discounts the threshold needed
+    # to act on it, instead of requiring the same bar the system uses on quiet
+    # tape. This is the per-ticker complement to the regime-level breakout
+    # overlay in adaptive_engine — it reacts to *this* ticker actually moving,
+    # not just the macro regime.
+    from app.services.quant_engine.intraday import RVOL_THRESHOLD
+    BREAKOUT_THRESHOLD_DISCOUNT = 0.7
+    breakout_confirmed = (
+        intraday_active
+        and intraday_result["rvol"] >= RVOL_THRESHOLD
+        and (intraday_score > 0) == (combined > 0)
+    )
+    if breakout_confirmed:
+        buy_thr  *= BREAKOUT_THRESHOLD_DISCOUNT
+        sell_thr *= BREAKOUT_THRESHOLD_DISCOUNT
+
     if combined >= buy_thr:
         direction = "BUY"
     elif combined <= sell_thr:
@@ -248,5 +265,6 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
             "trendline_breakdown":      tl_result["breakdown"],
             "buy_threshold":            round(buy_thr, 4),
             "sell_threshold":           round(sell_thr, 4),
+            "breakout_mode":            breakout_confirmed,
         },
     )

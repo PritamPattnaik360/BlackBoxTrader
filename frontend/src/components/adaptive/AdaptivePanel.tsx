@@ -9,11 +9,13 @@ import {
 import { Brain, RefreshCw, RotateCcw, TrendingUp, TrendingDown, Activity } from 'lucide-react'
 
 const REGIME_COLORS: Record<string, string> = {
-  normal:          'bg-gray-700 text-gray-200',
-  high_volatility: 'bg-red-900 text-red-300',
-  low_volatility:  'bg-blue-900 text-blue-300',
-  trending_up:     'bg-green-900 text-green-300',
-  trending_down:   'bg-orange-900 text-orange-300',
+  normal:                'bg-gray-700 text-gray-200',
+  high_volatility:       'bg-red-900 text-red-300',
+  low_volatility:        'bg-blue-900 text-blue-300',
+  trending_up:           'bg-green-900 text-green-300',
+  trending_down:         'bg-orange-900 text-orange-300',
+  volatile_trending_up:  'bg-emerald-900 text-emerald-300',
+  volatile_trending_down: 'bg-rose-900 text-rose-300',
 }
 
 const PARAM_LABELS: Record<string, string> = {

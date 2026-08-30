@@ -35,6 +35,7 @@ async def run_portfolio_sync():
                 current_price=p["current_price"],
                 unrealized_pnl=p["unrealized_pnl"],
                 asset_class=p.get("asset_class", "us_equity"),
+                contract_symbol=p.get("contract_symbol"),
                 is_open=True,
             ))
             new_tickers.add(p["ticker"])

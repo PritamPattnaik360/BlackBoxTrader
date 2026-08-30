@@ -20,10 +20,10 @@ DEFAULTS: dict[str, float] = {
 }
 
 BOUNDS: dict[str, tuple[float, float]] = {
-    "buy_signal_threshold":  (0.15, 0.55),
-    "sell_signal_threshold": (-0.55, -0.15),
-    "risk_per_trade_pct":    (0.005, 0.02),
-    "atr_stop_multiplier":   (1.5, 3.5),
+    "buy_signal_threshold":  (0.10, 0.60),
+    "sell_signal_threshold": (-0.60, -0.10),
+    "risk_per_trade_pct":    (0.005, 0.035),
+    "atr_stop_multiplier":   (1.2, 4.0),
 }
 
 # ── In-memory state ──────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ _regime: str = "normal"
 _current_generation: int = 0
 _outcomes_since_last_opt: int = 0
 
-OPTIMIZE_AFTER_N_OUTCOMES = 20   # auto-trigger every N closed trades
+OPTIMIZE_AFTER_N_OUTCOMES = 10   # auto-trigger every N closed trades
 
 
 # ── Public accessors ─────────────────────────────────────────────────────────
@@ -161,10 +161,25 @@ async def run_optimization(session) -> None:
 def _apply_regime_overlay(params: dict[str, float], regime: str) -> None:
     """Shift parameters according to market regime."""
     if regime == "high_volatility":
-        # Wider stops, more conservative thresholds
+        # Elevated vol with NO confirmed trend = choppy/whipsaw conditions.
+        # Stay defensive: wider stops, more conservative thresholds.
         params["atr_stop_multiplier"] = clamp("atr_stop_multiplier", params.get("atr_stop_multiplier", DEFAULTS["atr_stop_multiplier"]) + 0.5)
         params["buy_signal_threshold"] = clamp("buy_signal_threshold", params.get("buy_signal_threshold", DEFAULTS["buy_signal_threshold"]) + 0.04)
         params["sell_signal_threshold"] = clamp("sell_signal_threshold", params.get("sell_signal_threshold", DEFAULTS["sell_signal_threshold"]) - 0.04)
+    elif regime in ("volatile_trending_up", "volatile_trending_down"):
+        # Breakout mode: elevated vol WITH a confirmed directional trend.
+        # This used to be lumped into high_volatility and dampened like
+        # chop — but a big confirmed move is exactly when the system
+        # should lean in, not sit out. Stops stay wide (real trends need
+        # room to breathe) while thresholds loosen in the trend direction
+        # so signals in that direction actually get acted on.
+        params["atr_stop_multiplier"] = clamp("atr_stop_multiplier", params.get("atr_stop_multiplier", DEFAULTS["atr_stop_multiplier"]) + 0.3)
+        if regime == "volatile_trending_up":
+            params["buy_signal_threshold"] = clamp("buy_signal_threshold", params.get("buy_signal_threshold", DEFAULTS["buy_signal_threshold"]) - 0.06)
+            params["sell_signal_threshold"] = clamp("sell_signal_threshold", params.get("sell_signal_threshold", DEFAULTS["sell_signal_threshold"]) - 0.03)
+        else:
+            params["sell_signal_threshold"] = clamp("sell_signal_threshold", params.get("sell_signal_threshold", DEFAULTS["sell_signal_threshold"]) + 0.06)
+            params["buy_signal_threshold"] = clamp("buy_signal_threshold", params.get("buy_signal_threshold", DEFAULTS["buy_signal_threshold"]) + 0.03)
     elif regime == "low_volatility":
         # Tighter stops, allow more signals
         params["atr_stop_multiplier"] = clamp("atr_stop_multiplier", params.get("atr_stop_multiplier", DEFAULTS["atr_stop_multiplier"]) - 0.2)

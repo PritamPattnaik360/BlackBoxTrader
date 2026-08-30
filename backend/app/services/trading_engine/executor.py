@@ -9,6 +9,11 @@ Two runtime modes:
   autonomous=False — system only generates signals; user trades manually
 
 Enabling autonomous mode automatically disables dry_run (enables paper execution).
+
+When settings.enable_options_trading is on, signals trade long options
+instead of shares (see _execute_options_signal): BUY opens a call, SELL
+opens a put. There is still no short-selling — bearish exposure comes from
+owning a put, not shorting the underlying.
 """
 import logging
 from app.config import settings
@@ -96,23 +101,29 @@ async def execute_signal(
         logger.warning(f"Price fetch failed for {signal.ticker} — snapshot={snapshot}")
         return result
 
-    side = "buy" if signal.direction == "BUY" else "sell"
-
     # ── Position guard ────────────────────────────────────────────────────────
     # Fetch live positions once (cheap Alpaca call) so we never short-sell
     # on a paper account and never double-buy a ticker we already hold.
+    # broker.get_positions() normalizes options contracts back to their
+    # underlying ticker, so this lookup works the same for both asset classes.
     try:
         from app.services.trading_engine import broker
-        live_positions = {p["ticker"] for p in broker.get_positions()}
+        live_positions = broker.get_positions()
     except Exception as e:
         logger.warning(f"Could not fetch positions for guard check: {e} — proceeding")
-        live_positions = set()
+        live_positions = []
+    held = next((p for p in live_positions if p["ticker"] == signal.ticker), None)
 
-    if side == "buy" and signal.ticker in live_positions:
+    if settings.enable_options_trading:
+        return await _execute_options_signal(signal, price, equity, held, source, quant_score)
+
+    side = "buy" if signal.direction == "BUY" else "sell"
+
+    if side == "buy" and held is not None:
         result.update(action="skip", reason="Already holding position — skipping duplicate BUY")
         return result
 
-    if side == "sell" and signal.ticker not in live_positions:
+    if side == "sell" and held is None:
         result.update(action="skip", reason="No position to sell — skipping SELL (no short-selling)")
         return result
 
@@ -166,7 +177,8 @@ async def execute_signal(
     return result
 
 
-async def _save_order(ticker, side, qty, price, stop_price, signal_id, source, quant_score):
+async def _save_order(ticker, side, qty, price, stop_price, signal_id, source, quant_score,
+                       asset_class: str = "us_equity", contract_symbol: str | None = None):
     """Persist the order record to DB."""
     try:
         from app.db.session import AsyncSessionLocal
@@ -178,7 +190,114 @@ async def _save_order(ticker, side, qty, price, stop_price, signal_id, source, q
                 stop_price=stop_price, signal_id=signal_id,
                 status="submitted", source=source,
                 quant_score=quant_score,
+                asset_class=asset_class,
+                contract_symbol=contract_symbol,
             ))
             await db.commit()
     except Exception as e:
         logger.warning(f"Could not persist order record: {e}")
+
+
+# ── Options execution ───────────────────────────────────────────────────────
+
+async def _execute_options_signal(
+    signal:      CompositeSignal,
+    price:       float,
+    equity:      float,
+    held:        dict | None,
+    source:      str,
+    quant_score: float | None,
+) -> dict:
+    """
+    Options path for execute_signal — used when settings.enable_options_trading
+    is on. BUY opens a long call, SELL opens a long put: a bearish view is
+    expressed by buying a put, never by shorting shares. At most one options
+    position is carried per ticker — an opposite-direction contract already
+    held is closed rather than opened alongside it.
+    """
+    from app.services.trading_engine import broker, options_engine
+
+    result = {"ticker": signal.ticker, "direction": signal.direction, "action": None, "reason": None}
+    wants_type = "call" if signal.direction == "BUY" else "put"
+
+    if held is not None:
+        if held.get("option_type") is None:
+            result.update(action="skip", reason="Holding an equity position on this ticker — skipping options order")
+            return result
+
+        if held["option_type"] == wants_type:
+            result.update(action="skip", reason=f"Already holding a {wants_type} on {signal.ticker}")
+            return result
+
+        # Opposite-direction contract held → close it. A fresh position in
+        # the new direction can open on a later scan once this is flat.
+        contract_symbol = held["contract_symbol"]
+        qty = abs(held["qty"])
+        if _dry_run:
+            result.update(action="dry_run", qty=qty, price=held.get("current_price"),
+                          reason=f"would close {held['option_type']} ({contract_symbol})")
+            return result
+        try:
+            order = broker.submit_market_order(contract_symbol, "sell", qty)
+            await _save_order(
+                ticker=signal.ticker, side="sell", qty=qty,
+                price=held.get("current_price") or 0.0, stop_price=None,
+                signal_id=None, source=source, quant_score=quant_score,
+                asset_class="us_option", contract_symbol=contract_symbol,
+            )
+            result.update(action="submitted", order=str(order), reason=f"closed opposite {held['option_type']}")
+        except Exception as e:
+            logger.error(f"Options close failed for {contract_symbol}: {e}")
+            result.update(action="error", reason=str(e))
+        return result
+
+    # No existing options position on this ticker → open one.
+    contract = options_engine.select_best_strike(signal.ticker, price, signal.direction, settings.options_target_dte)
+    if contract is None:
+        result.update(action="skip", reason="No suitable options contract found")
+        return result
+
+    premium = contract["ask"] or contract["price"]
+    if not premium or premium <= 0 or contract["bid"] <= 0:
+        result.update(action="skip", reason="Contract has no bid/ask — illiquid, skipping")
+        return result
+
+    risk_pct = get_param("risk_per_trade_pct")
+    qty = options_engine.contract_size(equity, premium, risk_pct, settings.max_position_pct)
+    if qty <= 0:
+        result.update(action="skip", reason="Options sizer returned 0 contracts (premium too high for risk budget)")
+        return result
+
+    occ_symbol = options_engine.to_occ_symbol(
+        signal.ticker, contract["expiry"], contract["option_type"], contract["strike"]
+    )
+
+    notional = qty * premium * 100
+    if not portfolio_limits.check_position_size(notional, equity):
+        result.update(action="skip",
+                      reason=f"Position ${notional:.0f} exceeds max {settings.max_position_pct:.0%} of equity")
+        return result
+
+    if _dry_run:
+        logger.info(
+            f"[DRY RUN] Would BUY {qty}×{occ_symbol} @~${premium:.2f} "
+            f"({contract['option_type']}, strike={contract['strike']}, exp={contract['expiry']})"
+        )
+        result.update(action="dry_run", qty=qty, price=premium, contract=occ_symbol,
+                      expiry=contract["expiry"], strike=contract["strike"], option_type=contract["option_type"])
+        return result
+
+    try:
+        order = broker.submit_market_order(occ_symbol, "buy", qty)
+        logger.info(f"[{source.upper()}] Options order submitted: {order}")
+        await _save_order(
+            ticker=signal.ticker, side="buy", qty=qty, price=premium,
+            stop_price=None, signal_id=None, source=source, quant_score=quant_score,
+            asset_class="us_option", contract_symbol=occ_symbol,
+        )
+        result.update(action="submitted", order=str(order), contract=occ_symbol)
+    except Exception as e:
+        logger.error(f"Options order submission failed for {signal.ticker}: {e}")
+        result.update(action="error", reason=str(e))
+
+    return result

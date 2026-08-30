@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     default_stop_atr_multiplier: float = 2.0
     options_target_dte: int = 30
 
+    # Options trading — off by default. When enabled, BUY signals open long
+    # calls and SELL signals open long puts (still no short-selling — a
+    # bearish view is expressed by buying a put, not shorting shares).
+    enable_options_trading: bool = False
+
     # Autonomous trading — set AUTO_START_AUTONOMOUS=true in .env to enable on boot
     auto_start_autonomous: bool = False
 

@@ -40,11 +40,26 @@ def get_account() -> dict:
 
 
 def get_positions() -> list[dict]:
+    """
+    Fetch live positions from Alpaca.
+
+    For an options contract, Alpaca's `symbol` is the full OCC contract
+    (e.g. AAPL250926C00230000). Callers throughout the app (dedupe checks,
+    portfolio sync, outcome/PnL tracking) key positions by *underlying*
+    ticker, so this normalizes `ticker` back to the root symbol and carries
+    the exact contract symbol separately for order submission on close.
+    """
+    from app.services.trading_engine.options_engine import parse_occ_symbol
+
     client = get_trading_client()
     positions = client.get_all_positions()
-    return [
-        {
-            "ticker": p.symbol,
+    result = []
+    for p in positions:
+        parsed = parse_occ_symbol(p.symbol)
+        result.append({
+            "ticker": parsed["ticker"] if parsed else p.symbol,
+            "contract_symbol": p.symbol if parsed else None,
+            "option_type": parsed["option_type"] if parsed else None,
             "qty": float(p.qty),
             "avg_entry_price": float(p.avg_entry_price),
             "current_price": float(p.current_price),
@@ -52,9 +67,8 @@ def get_positions() -> list[dict]:
             "unrealized_pnl_pct": float(p.unrealized_plpc),
             "market_value": float(p.market_value),
             "asset_class": str(p.asset_class),
-        }
-        for p in positions
-    ]
+        })
+    return result
 
 
 def get_open_orders() -> list[dict]:

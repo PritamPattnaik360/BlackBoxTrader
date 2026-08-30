@@ -22,6 +22,7 @@ class TradeOrder(Base):
         Integer, ForeignKey("signal.id"), nullable=True
     )
     asset_class: Mapped[str] = mapped_column(String(15), default="us_equity")
+    contract_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
     source: Mapped[str] = mapped_column(String(10), default="manual")  # auto | manual
     quant_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(
