@@ -182,6 +182,26 @@ pm2 logs        # tail backend.log / frontend.log
 pm2 stop all
 ```
 
+Handy PM2 commands:
+
+| Command | What it does |
+|---|---|
+| `pm2 status` | Shows what's running |
+| `pm2 logs blackbox-backend` | Live backend logs (also written to `logs/`) |
+| `pm2 restart all` | Applies code changes (there's no auto-reload under PM2) |
+| `pm2 stop all` | Stops both services |
+
+Under PM2 the backend listens on port **8001** (the frontend dev server proxies `/api` there), so the API docs are at http://localhost:8001/docs and the health check at http://localhost:8001/health. Both services restart automatically if they crash.
+
+**Start on login (Windows):** PM2 doesn't survive a reboot on its own. Register a logon task that runs `pm2 resurrect` (run `pm2 save` first):
+
+```powershell
+$pm2 = (Get-Command pm2.cmd).Source
+Register-ScheduledTask -TaskName "BlackBoxTrader-pm2" `
+  -Action (New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$pm2`" resurrect") `
+  -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)
+```
+
 Once running:
 
 - **Frontend UI:** http://localhost:5173
@@ -265,6 +285,17 @@ npm install -g pm2
 pm2 start ecosystem.config.js
 pm2 save
 ```
+
+See [Option C](#option-c--pm2-background-services-eg-for-always-on-paper-trading) above for the day-to-day PM2 commands.
+
+## Training data in git
+
+The bot's learning data (LLM training samples, signal outcomes, day-trade journal) lives in the git-ignored SQLite DB, so a `pre-push` hook (`.githooks/pre-push`) exports it to `data/training/*.jsonl` and commits it before each push. If the data changed, the hook makes the commit and stops the push once — run `git push` again to send it.
+
+- Enable the hook once per clone: `git config core.hooksPath .githooks`
+- Restore the data into a fresh database: `python scripts/sync_training_data.py import`
+- Export by hand: `python scripts/sync_training_data.py export`
+- Skip the hook for one push: `SKIP_TRAINING_SYNC=1 git push`
 
 ## Security note
 

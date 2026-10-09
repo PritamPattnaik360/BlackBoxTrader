@@ -1,0 +1,242 @@
+From 18a4f8355b739e274831ffdf32b086b4a3287b9d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 9 Oct 2026 06:48:19 +0000
+Subject: [PATCH] Backtester: add trend_macd_atr strategy, next-open/cost-aware
+ simulator, fix NaN equity on ragged tickers
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01MENAZ7xVWMoa43AGW8kVPY
+---
+ backend/app/services/backtester/engine.py   | 89 +++++++++++++++++++--
+ backend/app/services/backtester/strategy.py | 39 +++++++++
+ backend/tests/unit/test_trend_macd_atr.py   | 35 ++++++++
+ 3 files changed, 157 insertions(+), 6 deletions(-)
+ create mode 100644 backend/tests/unit/test_trend_macd_atr.py
+
+diff --git a/backend/app/services/backtester/engine.py b/backend/app/services/backtester/engine.py
+index c96cbd6..0bf2ccb 100644
+--- a/backend/app/services/backtester/engine.py
++++ b/backend/app/services/backtester/engine.py
+@@ -2,7 +2,7 @@ import pandas as pd
+ import numpy as np
+ import logging
+ from app.services.backtester.data_loader import load_ohlcv, load_intraday_ohlcv
+-from app.services.backtester.strategy import NLPProxyStrategy, TechnicalStrategy, IntradayORBVWAPStrategy, BaseStrategy
++from app.services.backtester.strategy import NLPProxyStrategy, TechnicalStrategy, IntradayORBVWAPStrategy, TrendMACDATRStrategy, BaseStrategy
+ from app.services.backtester.metrics import compute_metrics
+ 
+ logger = logging.getLogger(__name__)
+@@ -11,8 +11,13 @@ STRATEGIES = {
+     "nlp_proxy":    NLPProxyStrategy,
+     "sma_crossover": TechnicalStrategy,
+     "intraday_orb": IntradayORBVWAPStrategy,
++    "trend_macd_atr": TrendMACDATRStrategy,
+ }
+ 
++# Per-side transaction cost (commission + slippage) used by the realistic simulator.
++COST_PER_SIDE = 0.0010
++WARMUP_DAYS = 400
++
+ 
+ def run_backtest(
+     tickers: list[str],
+@@ -35,13 +40,21 @@ def run_backtest(
+ 
+     for ticker in tickers:
+         try:
+-            df = load_ohlcv(ticker, start, end)
+-            if df.empty or len(df) < 50:
++            # Load extra history so indicators (SMA100, MACD, ...) are warmed up at `start`.
++            warm_start = (pd.Timestamp(start) - pd.Timedelta(days=WARMUP_DAYS)).strftime("%Y-%m-%d")
++            full = load_ohlcv(ticker, warm_start, end)
++            if full.empty or len(full[start:]) < 50:
+                 logger.warning(f"Insufficient data for {ticker}")
+                 continue
+ 
+-            signals = strategy.generate_signals(df)
+-            equity, trades = _simulate(df, signals, capital_per_ticker)
++            # Signals use only data up to each bar (causal indicators), so computing them
++            # on the warm-up history and trading only the [start, end] slice is leak-free.
++            signals = strategy.generate_signals(full).loc[start:]
++            df = full.loc[start:]
++            if hasattr(strategy, "atr_stop_mult"):
++                equity, trades = _simulate_next_open(df, signals, capital_per_ticker, strategy.atr_stop_mult)
++            else:
++                equity, trades = _simulate(df, signals, capital_per_ticker)
+             all_equity.append(equity)
+             all_trades.append(trades)
+         except Exception as e:
+@@ -50,7 +63,15 @@ def run_backtest(
+     if not all_equity:
+         return {"error": "No data available for any ticker"}
+ 
+-    combined_equity = sum(all_equity) if len(all_equity) > 1 else all_equity[0]
++    # Tickers can start on different dates (IPOs): align on the union of dates, hold the
++    # unallocated capital as cash before a ticker's first bar (previously produced NaN).
++    aligned = []
++    for eq in all_equity:
++        aligned.append(eq)
++    combined_equity = pd.concat(aligned, axis=1)
++    for col in combined_equity.columns:
++        combined_equity[col] = combined_equity[col].bfill().fillna(capital_per_ticker)
++    combined_equity = combined_equity.ffill().sum(axis=1)
+     combined_trades = pd.concat(all_trades) if all_trades else pd.DataFrame()
+     metrics = compute_metrics(combined_equity, combined_trades)
+     trade_log = _trades_to_log(combined_trades)
+@@ -93,6 +114,62 @@ def _simulate(df: pd.DataFrame, signals: pd.Series, capital: float) -> tuple[pd.
+     return equity.ffill(), pd.DataFrame(trades)
+ 
+ 
++def _atr(df: pd.DataFrame, n: int = 14) -> np.ndarray:
++    pc = df["close"].shift()
++    tr = pd.concat([df["high"] - df["low"], (df["high"] - pc).abs(), (df["low"] - pc).abs()], axis=1).max(axis=1)
++    return tr.rolling(n).mean().values
++
++
++def _simulate_next_open(df: pd.DataFrame, signals: pd.Series, capital: float,
++                        atr_mult: float, cost: float = COST_PER_SIDE) -> tuple[pd.Series, pd.DataFrame]:
++    """
++    Long-only simulator: signals seen at close t fill at open t+1 (no look-ahead),
++    per-side transaction cost, ATR trailing stop (stop from prior-bar ATR, intrabar low
++    trigger, gap-aware fill at min(open, stop)).
++    """
++    o, c, l = df["open"].values, df["close"].values, df["low"].values
++    a = _atr(df)
++    sig = signals.values
++    cash, pos, ep, stop, ei, pend = capital, 0, 0.0, 0.0, -1, 0
++    eq = np.full(len(df), capital, dtype=float)
++    trades = []
++
++    def close_pos(i, px):
++        nonlocal cash, pos
++        px = px * (1 - cost)
++        cash += pos * px
++        trades.append({"entry_ts": df.index[ei], "exit_ts": df.index[i], "entry": ep, "exit": px,
++                       "qty": pos, "pnl": (px - ep) * pos})
++        pos = 0
++
++    for i in range(len(df)):
++        if pend == 1 and pos == 0:
++            px = o[i] * (1 + cost)
++            sh = int(cash * 0.95 / px)
++            if sh > 0 and not np.isnan(a[i - 1]):
++                pos, ep, ei = sh, px, i
++                cash -= sh * px
++                stop = px - atr_mult * a[i - 1]
++        elif pend == -1 and pos > 0:
++            close_pos(i, o[i])
++        pend = 0
++        if pos > 0:
++            if i > ei and not np.isnan(a[i]):
++                stop = max(stop, c[i] - atr_mult * a[i])
++            if l[i] <= stop:
++                close_pos(i, min(o[i], stop))
++        if i < len(df) - 1:
++            if pos == 0 and sig[i] == 1:
++                pend = 1
++            elif pos > 0 and sig[i] == -1:
++                pend = -1
++        eq[i] = cash + pos * c[i]
++    if pos > 0:
++        close_pos(len(df) - 1, c[-1])
++        eq[-1] = cash
++    return pd.Series(eq, index=df.index), pd.DataFrame(trades)
++
++
+ def _trades_to_log(trades: pd.DataFrame) -> list[dict]:
+     if trades.empty:
+         return []
+diff --git a/backend/app/services/backtester/strategy.py b/backend/app/services/backtester/strategy.py
+index 59d420d..a78d14c 100644
+--- a/backend/app/services/backtester/strategy.py
++++ b/backend/app/services/backtester/strategy.py
+@@ -63,6 +63,45 @@ class TechnicalStrategy(BaseStrategy):
+         return signals
+ 
+ 
++class TrendMACDATRStrategy(BaseStrategy):
++    """
++    Trend-filtered MACD momentum entry with an ATR trailing stop.
++
++    Replaces the over-strict NLPProxy gate (RSI<40 AND MACD cross) which, on
++    2018-2026 daily data for the 14-name universe, produced ~115 trades with
++    negative expectancy after costs.
++
++    Entry : MACD histogram crosses up, close > SMA(trend_period), RSI < rsi_max.
++    Exit  : MACD histogram crosses down, OR ATR trailing stop (handled by the
++            engine via ``atr_stop_mult``; stop is set from the prior bar's ATR,
++            so there is no look-ahead).
++    Signals are observed at the close of bar t and filled at the OPEN of t+1.
++    """
++
++    atr_stop_mult = 3.0
++
++    def __init__(self, trend_period: int = 100, rsi_max: float = 65.0, atr_stop_mult: float = 3.0):
++        self.trend_period = trend_period
++        self.rsi_max = rsi_max
++        self.atr_stop_mult = atr_stop_mult
++
++    def generate_signals(self, df: pd.DataFrame) -> pd.Series:
++        close = df["close"]
++        delta = close.diff()
++        gain = delta.clip(lower=0).rolling(14).mean()
++        loss = (-delta.clip(upper=0)).rolling(14).mean()
++        rsi = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
++        macd = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
++        hist = macd - macd.ewm(span=9, adjust=False).mean()
++        cross_up = (hist > 0) & (hist.shift(1) <= 0)
++        cross_dn = (hist < 0) & (hist.shift(1) >= 0)
++        uptrend = close > close.rolling(self.trend_period).mean()
++        signals = pd.Series(0, index=df.index)
++        signals[cross_up & uptrend & (rsi < self.rsi_max)] = 1
++        signals[cross_dn] = -1
++        return signals
++
++
+ class IntradayORBVWAPStrategy(BaseStrategy):
+     """
+     Intraday day-trading strategy that mirrors the live intraday engine.
+diff --git a/backend/tests/unit/test_trend_macd_atr.py b/backend/tests/unit/test_trend_macd_atr.py
+new file mode 100644
+index 0000000..03653cf
+--- /dev/null
++++ b/backend/tests/unit/test_trend_macd_atr.py
+@@ -0,0 +1,35 @@
++import numpy as np
++import pandas as pd
++
++from app.services.backtester.engine import _simulate_next_open
++from app.services.backtester.strategy import TrendMACDATRStrategy
++
++
++def _df(n=300, seed=0):
++    rng = np.random.default_rng(seed)
++    close = 100 * np.exp(np.cumsum(rng.normal(0.0004, 0.015, n)))
++    idx = pd.date_range("2020-01-01", periods=n, freq="B")
++    return pd.DataFrame({"open": close * 0.999, "high": close * 1.01, "low": close * 0.99,
++                         "close": close, "volume": 1e6}, index=idx)
++
++
++def test_signals_only_entry_in_uptrend():
++    df = _df()
++    sig = TrendMACDATRStrategy().generate_signals(df)
++    sma = df["close"].rolling(100).mean()
++    assert (df["close"][sig == 1] > sma[sig == 1]).all()
++
++
++def test_fills_at_next_open_with_costs_and_no_negative_cash():
++    df = _df()
++    sig = TrendMACDATRStrategy().generate_signals(df)
++    eq, tr = _simulate_next_open(df, sig, 10_000, 3.0)
++    assert eq.min() > 0 and not tr.empty
++    first = tr.iloc[0]
++    assert first["entry"] in set(df["open"] * 1.001)  # filled at an open plus cost
++
++
++def test_zero_signals_means_flat_equity():
++    df = _df()
++    eq, tr = _simulate_next_open(df, pd.Series(0, index=df.index), 10_000, 3.0)
++    assert tr.empty and eq.iloc[-1] == 10_000
+-- 
+2.43.0
+

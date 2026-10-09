@@ -41,8 +41,10 @@ async def get_status():
                 models = [m["name"] for m in r.json().get("models", [])]
         except Exception:
             pass
+    from app.services.quant_engine.signal_combiner import _market_is_open
     return {
         "ollama_running": available,
+        "market_open": _market_is_open(),   # the LLM trading signal only runs while True
         "models": models,
         "default_model": llm_signal.DEFAULT_MODEL,
         "setup_url": "https://ollama.com/download",

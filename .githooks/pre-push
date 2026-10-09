@@ -1,0 +1,23 @@
+#!/bin/sh
+# Before every push: export the bot's learning data (llm samples, signal outcomes,
+# day-trade journal) from the git-ignored SQLite DB into data/training/*.jsonl and
+# commit it, so the data travels with the repository.
+#
+# A hook can't add a commit to the push already in progress, so if the data changed
+# the new commit is created and the push stops once - just run `git push` again.
+# Set SKIP_TRAINING_SYNC=1 to bypass.
+[ -n "$SKIP_TRAINING_SYNC" ] && exit 0
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || exit 0
+
+python scripts/sync_training_data.py export >/dev/null 2>&1 || python3 scripts/sync_training_data.py export >/dev/null 2>&1 || exit 0
+
+if [ -n "$(git status --porcelain -- data/training)" ]; then
+  git add data/training
+  git commit -q -m "chore: update bot training data" -- data/training || exit 0
+  echo "pre-push: training data changed and was committed ('chore: update bot training data')."
+  echo "pre-push: run 'git push' again to include it."
+  exit 1
+fi
+exit 0
