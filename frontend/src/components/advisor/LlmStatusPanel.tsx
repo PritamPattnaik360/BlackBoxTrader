@@ -4,6 +4,7 @@ import api from '../../api/client'
 
 interface LlmStatus {
   ollama_running: boolean
+  market_open: boolean
   models: string[]
   default_model: string
   recommended_model: string
@@ -46,9 +47,18 @@ export default function LlmStatusPanel() {
             ? <CheckCircle size={13} className="text-green-400" />
             : <XCircle size={13} className="text-gray-500" />}
           <span className={`text-sm font-medium ${running ? 'text-green-300' : 'text-gray-400'}`}>
-            {running ? 'LLM Active — contributing to signals' : 'LLM Offline — signals use 4-factor model'}
+            {!running
+              ? 'LLM Offline — signals use 4-factor model'
+              : status?.market_open
+                ? 'LLM Active — contributing to signals'
+                : 'LLM Standby — runs during market hours only'}
           </span>
         </div>
+        {running && !status?.market_open && (
+          <div className="text-xs text-gray-500 mt-1">
+            Market is closed (Mon–Fri 9:30–16:00 ET). The LLM signal resumes at the next open.
+          </div>
+        )}
         {running && status?.models && status.models.length > 0 && (
           <div className="text-xs text-gray-400 mt-1">
             Models: {status.models.join(', ')}

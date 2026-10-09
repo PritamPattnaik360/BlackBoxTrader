@@ -1,26 +1,16 @@
 """
 Combined quant + NLP signal.
 
-During market hours, intraday signals (VWAP, ORB, momentum on 5-min bars)
-dominate the score. Outside market hours, the daily swing-trading factors
-take over.
+The algorithm mix depends on two things:
+  * Market bias (bull / neutral / bear, from SPY trend + VIX) — picks the weight
+    table, threshold shifts, position-size multiplier and stop width. See
+    app.services.strategy.market_bias.PROFILES for the exact numbers.
+  * Market hours — during the session the intraday composite (VWAP / opening
+    range breakout / 5-min momentum, or the bounce-fade in bear markets) is
+    included; outside it the daily swing factors take over.
 
-Intraday weights (market open):
-  Intraday composite  36%  — VWAP + ORB + 5-min momentum
-  NLP (news)          18%  — directional news flow
-  Momentum (12-1 mo)  18%  — Jegadeesh-Titman factor
-  Trend lines         10%  — swing pivot support/resistance
-  Mean reversion       9%  — Bollinger/OU
-  Technical            9%  — RSI + MACD + EMA
-
-Daily weights (market closed):
-  NLP                 31%
-  Momentum            26%
-  Trend lines         12%
-  Mean reversion      18%
-  Technical           13%
-
-The adaptive engine tunes the buy/sell thresholds that act on the score.
+When the local LLM is online it takes a 20% slice and the rest scale down.
+The adaptive engine tunes the base buy/sell thresholds the profile shifts.
 """
 import asyncio
 import logging
@@ -28,8 +18,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
+from app.services.strategy import market_bias
+
 logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
+
+# Day-trade entries are only taken after the opening range has formed and
+# before the late-session liquidity drain.
+DAY_TRADE_START = dtime(10, 0)
+DAY_TRADE_END   = dtime(15, 30)
+DAY_TRADE_MIN_INTRADAY_SCORE = 0.35
+BREAKOUT_THRESHOLD_DISCOUNT = 0.7   # thresholds shrink to this fraction on a volume-confirmed breakout
 
 
 def _market_is_open() -> bool:
@@ -40,43 +39,11 @@ def _market_is_open() -> bool:
     return dtime(9, 30) <= t <= dtime(16, 0)
 
 
-# Weights when LLM is offline (sum = 1.0)
-_WEIGHTS_NO_LLM = {
-    "nlp":            0.31,
-    "momentum":       0.26,
-    "mean_reversion": 0.18,
-    "technical":      0.13,
-    "trendlines":     0.12,
-}
-# Weights when LLM is online — its signal takes 20%, others scale down
-_WEIGHTS_WITH_LLM = {
-    "nlp":            0.25,
-    "momentum":       0.21,
-    "mean_reversion": 0.14,
-    "technical":      0.10,
-    "llm":            0.20,
-    "trendlines":     0.10,
-}
-# Intraday weights: VWAP/ORB/momentum on 5-min bars dominate
-_WEIGHTS_INTRADAY = {
-    "intraday":       0.36,
-    "nlp":            0.18,
-    "momentum":       0.18,
-    "mean_reversion": 0.09,
-    "technical":      0.09,
-    "trendlines":     0.10,
-}
-_WEIGHTS_INTRADAY_LLM = {
-    "intraday":       0.29,
-    "nlp":            0.14,
-    "momentum":       0.14,
-    "mean_reversion": 0.07,
-    "technical":      0.08,
-    "llm":            0.20,
-    "trendlines":     0.08,
-}
+def _in_day_trade_window() -> bool:
+    return DAY_TRADE_START <= datetime.now(ET).time() <= DAY_TRADE_END
 
-WEIGHTS = _WEIGHTS_NO_LLM  # exported for UI display; updated dynamically per call
+
+WEIGHTS = market_bias.PROFILES["neutral"].daily_weights  # exported for UI display
 
 
 @dataclass
@@ -94,6 +61,10 @@ class QuantAnalysis:
     confidence:           float    # 0-1
     llm_active:           bool
     intraday_active:      bool
+    bias:                 str = "neutral"   # bull | neutral | bear
+    trade_style:          str = "swing"     # swing | day
+    size_mult:            float = 1.0       # profile position-size multiplier
+    stop_mult_adj:        float = 0.0       # profile ATR-stop adjustment
     components:           dict = field(default_factory=dict)
 
 
@@ -110,6 +81,8 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
     from app.services.adaptive.adaptive_engine import get_param
 
     market_open = _market_is_open()
+    bias        = market_bias.get_bias()
+    profile     = market_bias.get_profile(bias)
 
     # ── Daily prices (always fetched for swing factors) ───────────────────
     try:
@@ -137,11 +110,11 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
     trendline_score = tl_result["score"]
 
     # ── Intraday signals (market hours only) ─────────────────────────────
-    intraday_result = {"combined": 0.0, "vwap": 0.0, "orb": 0.0, "intraday_momentum": 0.0, "rvol": 1.0}
+    intraday_result = {"combined": 0.0, "vwap": 0.0, "orb": 0.0, "intraday_momentum": 0.0, "fade": 0.0, "rvol": 1.0}
     if market_open:
         try:
             df_5m = await asyncio.to_thread(get_intraday_5m, ticker)
-            intraday_result = intraday_compute(df_5m, avg_daily_vol)
+            intraday_result = intraday_compute(df_5m, avg_daily_vol, bias)
         except Exception as e:
             logger.warning(f"Intraday data fetch failed for {ticker}: {e}")
     intraday_score  = intraday_result["combined"]
@@ -152,7 +125,41 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
     from app.services.adaptive.regime_detector import get_current_regime
 
     regime     = get_current_regime()
-    llm_online = await llm_alive()
+    # The LLM trading signal only runs while the US market is open; outside the
+    # session the daily factors are used alone (no point burning inference on
+    # signals that can't be traded until the next open).
+    llm_online = market_open and await llm_alive()
+
+    def _blend(w: dict, llm: float) -> float:
+        if market_open:
+            total = w["intraday"] * intraday_score
+        else:
+            total = 0.0
+        return (total
+                + w["nlp"]            * nlp_score
+                + w["momentum"]       * mom_score
+                + w["mean_reversion"] * mr_score
+                + w["technical"]      * tech_score
+                + w["trendlines"]     * trendline_score
+                + w.get("llm", 0.0)   * llm)
+
+    base = profile.intraday_weights if market_open else profile.daily_weights
+
+    # Adaptive base thresholds, shifted by the market-bias profile
+    # (bull: easier BUY / harder SELL; bear: much harder BUY / easier exit).
+    buy_thr  = min(0.70, max(0.10, get_param("buy_signal_threshold") + profile.buy_thr_adj))
+    sell_thr = min(-0.08, max(-0.60, get_param("sell_signal_threshold") + profile.sell_thr_adj))
+
+    # LLM inference is by far the slowest step (~15s/ticker). With the LLM online,
+    # combined = 0.8·pre + 0.2·llm with llm ∈ [-1, 1], so it can only change the
+    # decision if that range reaches a threshold. Otherwise skip it — the BUY /
+    # SELL / HOLD outcome is identical and a 25-35 ticker scan fits its interval.
+    if llm_online:
+        pre = _blend(base, 0.0)
+        lo, hi = 0.8 * pre - 0.2, 0.8 * pre + 0.2
+        certain_hold = hi < BREAKOUT_THRESHOLD_DISCOUNT * buy_thr and lo > BREAKOUT_THRESHOLD_DISCOUNT * sell_thr
+        if certain_hold or lo >= buy_thr or hi <= sell_thr:
+            llm_online = False
 
     if llm_online:
         llm_score = await llm_compute(
@@ -168,32 +175,10 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
         llm_score = 0.0
 
     # ── Combine ───────────────────────────────────────────────────────────
-    if market_open:
-        w = _WEIGHTS_INTRADAY_LLM if llm_online else _WEIGHTS_INTRADAY
-        combined = (
-            w["intraday"]           * intraday_score
-            + w["nlp"]              * nlp_score
-            + w["momentum"]         * mom_score
-            + w["mean_reversion"]   * mr_score
-            + w["technical"]        * tech_score
-            + w["trendlines"]       * trendline_score
-            + w.get("llm", 0.0)    * llm_score
-        )
-    else:
-        w = _WEIGHTS_WITH_LLM if llm_online else _WEIGHTS_NO_LLM
-        combined = (
-            w["nlp"]                * nlp_score
-            + w["momentum"]         * mom_score
-            + w["mean_reversion"]   * mr_score
-            + w["technical"]        * tech_score
-            + w["trendlines"]       * trendline_score
-            + w.get("llm", 0.0)    * llm_score
-        )
+    w = market_bias.with_llm(base) if llm_online else base
+    combined = _blend(w, llm_score)
 
     combined = max(-1.0, min(1.0, combined))
-
-    buy_thr  = get_param("buy_signal_threshold")
-    sell_thr = get_param("sell_signal_threshold")
 
     # Breakout mode: a confirmed high-volume intraday move (RVOL + ORB/VWAP/
     # momentum agreeing with the overall score) discounts the threshold needed
@@ -202,7 +187,6 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
     # overlay in adaptive_engine — it reacts to *this* ticker actually moving,
     # not just the macro regime.
     from app.services.quant_engine.intraday import RVOL_THRESHOLD
-    BREAKOUT_THRESHOLD_DISCOUNT = 0.7
     breakout_confirmed = (
         intraday_active
         and intraday_result["rvol"] >= RVOL_THRESHOLD
@@ -218,6 +202,20 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
         direction = "SELL"
     else:
         direction = "HOLD"
+
+    # Day trade = a strong intraday setup inside the trading window. Bull markets
+    # need a volume-confirmed breakout; in bear markets bounce-fades qualify without
+    # it (they're short-lived by nature). Everything else is a swing position.
+    trade_style = "swing"
+    if direction == "BUY" and intraday_active and _in_day_trade_window():
+        from app.config import settings
+        if settings.day_trade_only:
+            # Day-trade-only: every BUY with a live, positive intraday read is a same-day trade
+            if intraday_score > 0:
+                trade_style = "day"
+        elif (intraday_score >= DAY_TRADE_MIN_INTRADAY_SCORE
+              and (breakout_confirmed or bias == "bear")):
+            trade_style = "day"
 
     active_scores = [nlp_score, mom_score, mr_score, tech_score]
     if intraday_active:
@@ -241,11 +239,17 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
         trendline_score=round(trendline_score, 4),
         llm_active=llm_online,
         intraday_active=intraday_active,
+        bias=bias,
+        trade_style=trade_style,
+        size_mult=profile.size_mult,
+        stop_mult_adj=profile.stop_mult_adj,
         direction=direction,
         confidence=round(confidence, 4),
         components={
             "weights":                  w,
             "mode":                     "intraday" if market_open else "daily",
+            "bias":                     bias,
+            "trade_style":              trade_style,
             "nlp":                      round(nlp_score, 4),
             "momentum":                 round(mom_score, 4),
             "mean_reversion":           round(mr_score, 4),
@@ -256,6 +260,7 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
             "intraday_vwap":            round(intraday_result["vwap"], 4),
             "intraday_orb":             round(intraday_result["orb"], 4),
             "intraday_momentum":        round(intraday_result["intraday_momentum"], 4),
+            "intraday_fade":            round(intraday_result.get("fade", 0.0), 4),
             "rvol":                     round(intraday_result["rvol"], 3),
             "trendlines":               round(trendline_score, 4),
             "trendline_support":        tl_result["support_level"],

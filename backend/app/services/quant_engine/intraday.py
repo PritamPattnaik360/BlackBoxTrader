@@ -20,29 +20,36 @@ MOM_BARS = 5          # 5 × 5 min = last 25 minutes of momentum
 RVOL_THRESHOLD = 1.5  # amplify signals when volume is this high
 
 
-def compute_all(df: pd.DataFrame, avg_daily_vol: float = 0.0) -> dict:
+def compute_all(df: pd.DataFrame, avg_daily_vol: float = 0.0, bias: str = "neutral") -> dict:
     """
     Args:
         df: 5-minute OHLCV bars for the current session
             (columns: open, high, low, close, volume).
         avg_daily_vol: 3-month average daily volume from daily data
                        (used for RVOL; pass 0 to skip amplification).
-    Returns dict with keys: vwap, orb, intraday_momentum, rvol, combined.
+        bias: market bias ("bull" | "neutral" | "bear") — picks the playbook:
+              bull    → trend/breakout following (ORB gets the biggest weight)
+              neutral → original VWAP/ORB/momentum mix
+              bear    → breakouts fail more often, so fade washed-out dips instead
+    Returns dict with keys: vwap, orb, intraday_momentum, fade, rvol, combined.
     """
-    empty = {"vwap": 0.0, "orb": 0.0, "intraday_momentum": 0.0, "rvol": 1.0, "combined": 0.0}
+    empty = {"vwap": 0.0, "orb": 0.0, "intraday_momentum": 0.0, "fade": 0.0, "rvol": 1.0, "combined": 0.0}
     if df is None or df.empty or len(df) < 3:
         return empty
 
     vwap_score = _vwap_signal(df)
     orb_score  = _orb_signal(df)
     mom_score  = _intraday_momentum(df)
+    fade_score = _fade_signal(df)
     rvol       = _relative_volume(df, avg_daily_vol)
 
-    combined = (
-        0.40 * vwap_score
-        + 0.35 * orb_score
-        + 0.25 * mom_score
-    )
+    if bias == "bull":
+        combined = 0.30 * vwap_score + 0.40 * orb_score + 0.30 * mom_score
+    elif bias == "bear":
+        combined = (0.20 * vwap_score + 0.20 * orb_score
+                    + 0.15 * mom_score + 0.45 * fade_score)
+    else:
+        combined = 0.40 * vwap_score + 0.35 * orb_score + 0.25 * mom_score
 
     # Amplify when high relative volume (stock is actively traded)
     if rvol >= RVOL_THRESHOLD:
@@ -60,6 +67,7 @@ def compute_all(df: pd.DataFrame, avg_daily_vol: float = 0.0) -> dict:
         "vwap":              round(vwap_score, 4),
         "orb":               round(orb_score,  4),
         "intraday_momentum": round(mom_score,  4),
+        "fade":              round(fade_score, 4),
         "rvol":              round(rvol,        3),
         "combined":          round(combined,    4),
     }
@@ -137,6 +145,36 @@ def _intraday_momentum(df: pd.DataFrame) -> float:
         return max(-1.0, min(1.0, math.tanh(roc * 60.0)))
     except Exception as e:
         logger.debug(f"Intraday momentum error: {e}")
+        return 0.0
+
+
+def _fade_signal(df: pd.DataFrame, period: int = 7) -> float:
+    """
+    Intraday mean-reversion (used in bearish markets): 5-min RSI(7) washed out
+    AND price stretched below VWAP → bounce candidate (+); the mirror image
+    (overbought and stretched above VWAP) → fade the rip (−, i.e. exit signal).
+    Requires both conditions so a plain downtrend isn't mistaken for a bounce.
+    """
+    try:
+        closes = df["close"].dropna()
+        if len(closes) < period + 3:
+            return 0.0
+        delta = closes.diff()
+        gain = delta.clip(lower=0).ewm(com=period - 1, min_periods=period).mean()
+        loss = (-delta).clip(lower=0).ewm(com=period - 1, min_periods=period).mean()
+        rsi = float(100 - 100 / (1 + gain.iloc[-1] / max(loss.iloc[-1], 1e-9)))
+
+        typical = (df["high"] + df["low"] + df["close"]) / 3.0
+        vwap = (typical * df["volume"]).sum() / max(df["volume"].sum(), 1)
+        dev = (float(closes.iloc[-1]) - vwap) / vwap if vwap > 0 else 0.0
+
+        if rsi < 30 and dev < -0.004:
+            return min(1.0, (30 - rsi) / 20 + abs(dev) * 40)
+        if rsi > 70 and dev > 0.004:
+            return -min(1.0, (rsi - 70) / 20 + abs(dev) * 40)
+        return 0.0
+    except Exception as e:
+        logger.debug(f"Fade signal error: {e}")
         return 0.0
 
 

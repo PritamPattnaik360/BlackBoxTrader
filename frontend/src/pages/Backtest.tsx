@@ -28,6 +28,16 @@ const STRATEGIES = [
       'Good for comparing the AI strategy against a simple baseline.',
   },
   {
+    value: 'regime_adaptive',
+    label: 'Regime Adaptive — bull / neutral / bear',
+    intraday: false,
+    explain:
+      'Switches playbook with the market bias (SPY trend + VIX), as the live engine does. Bull: trend-follow ' +
+      '(close > 50-day SMA with positive momentum, exit on trend break). Neutral: buy RSI(5) < 30 dips. ' +
+      'Bear: only washed-out RSI(2) < 10 bounces, quick exits, and trend positions are dumped when the bias turns bear. ' +
+      'Compare it against the SMA crossover over 2018–2026 to see the effect of regime switching.',
+  },
+  {
     value: 'intraday_orb',
     label: 'Intraday ORB + VWAP (day trading)',
     intraday: true,

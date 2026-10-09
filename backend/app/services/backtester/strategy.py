@@ -187,3 +187,87 @@ class IntradayORBVWAPStrategy(BaseStrategy):
                 stop_price  = price * (1 + self.stop_pct)
 
         return trades
+
+
+class RegimeAdaptiveStrategy(BaseStrategy):
+    """
+    Daily long-only strategy that switches playbook with the market bias, the
+    same SPY-trend + VIX score the live engine uses (market_bias.compute_bias):
+
+      bull     → trend following: enter when close > SMA50 with positive 20-day
+                 momentum; exit on a close below SMA50, a flip to bear, or -8%.
+      neutral  → mean reversion: enter when RSI(5) < 30; exit RSI(5) > 60,
+                 10 days held, or -5%.
+      bear     → bounce only: enter when RSI(2) < 10 (washed out); exit
+                 RSI(2) > 65, 5 days held, or -5%. Trend positions opened
+                 earlier are closed as soon as the bias turns bear.
+    """
+
+    def __init__(self, bull_stop: float = 0.08, other_stop: float = 0.05):
+        self.bull_stop = bull_stop
+        self.other_stop = other_stop
+
+    @staticmethod
+    def bias_series(index: pd.DatetimeIndex) -> pd.Series:
+        """Vectorised historical version of market_bias.compute_bias()."""
+        import yfinance as yf
+        start = (index.min() - pd.Timedelta(days=420)).strftime("%Y-%m-%d")
+        end = (index.max() + pd.Timedelta(days=2)).strftime("%Y-%m-%d")
+        raw = yf.download(["SPY", "^VIX"], start=start, end=end, progress=False, auto_adjust=True)
+        close = raw["Close"].dropna(subset=["SPY"])
+        spy = close["SPY"]
+        vix = close["^VIX"].reindex(spy.index).ffill()
+        ma50, ma200 = spy.rolling(50).mean(), spy.rolling(200).mean()
+        ret20 = spy / spy.shift(20) - 1
+        score = (
+            np.where(spy > ma200, 1, -1) + np.where(ma50 > ma200, 1, -1) + np.where(spy > ma50, 1, -1)
+            + np.where(ret20 > 0.02, 1, np.where(ret20 < -0.04, -1, 0))
+            + np.where(vix < 18, 1, np.where(vix > 30, -2, np.where(vix > 24, -1, 0)))
+        )
+        bias = pd.Series(np.where(score >= 2, "bull", np.where(score <= -2, "bear", "neutral")), index=spy.index)
+        bias[ma200.isna()] = "neutral"
+        bias.index = bias.index.tz_localize(None) if bias.index.tz is not None else bias.index
+        return bias
+
+    @staticmethod
+    def _rsi(close: pd.Series, n: int) -> pd.Series:
+        d = close.diff()
+        g = d.clip(lower=0).ewm(alpha=1 / n, min_periods=n, adjust=False).mean()
+        l = (-d.clip(upper=0)).ewm(alpha=1 / n, min_periods=n, adjust=False).mean()
+        return 100 - 100 / (1 + g / l.replace(0, 1e-9))
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.Series:
+        close = df["close"]
+        idx = close.index.tz_localize(None) if close.index.tz is not None else close.index
+        bias = self.bias_series(idx).reindex(idx, method="ffill").fillna("neutral").values
+
+        sma50, sma5 = close.rolling(50).mean().values, close.rolling(5).mean().values
+        mom20 = (close / close.shift(20) - 1).values
+        rsi2, rsi5, rsi14 = self._rsi(close, 2).values, self._rsi(close, 5).values, self._rsi(close, 14).values
+        px = close.values
+
+        sig = np.zeros(len(px), dtype=int)
+        pos, mode, entry, held = 0, "", 0.0, 0
+        for i in range(len(px)):
+            b = bias[i]
+            if pos:
+                held += 1
+                ret = px[i] / entry - 1
+                if mode == "trend":
+                    out = px[i] < sma50[i] or b == "bear" or ret < -self.bull_stop
+                elif mode == "revert":
+                    out = rsi5[i] > 60 or held >= 10 or ret < -self.other_stop
+                else:  # bounce
+                    out = rsi2[i] > 65 or px[i] > sma5[i] or held >= 5 or ret < -self.other_stop
+                if out:
+                    sig[i], pos = -1, 0
+                continue
+            if np.isnan(sma50[i]) or np.isnan(rsi14[i]):
+                continue
+            if b == "bull" and px[i] > sma50[i] and mom20[i] > 0 and rsi14[i] < 75:
+                sig[i], pos, mode, entry, held = 1, 1, "trend", px[i], 0
+            elif b == "neutral" and rsi5[i] < 30:
+                sig[i], pos, mode, entry, held = 1, 1, "revert", px[i], 0
+            elif b == "bear" and rsi2[i] < 10:
+                sig[i], pos, mode, entry, held = 1, 1, "bounce", px[i], 0
+        return pd.Series(sig, index=df.index)

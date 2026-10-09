@@ -27,6 +27,20 @@ logger = logging.getLogger(__name__)
 _dry_run:    bool = True   # always start safe
 _autonomous: bool = False  # must be explicitly enabled
 
+DAY_STOP_ATR    = 0.6   # day-trade stop distance in daily ATRs
+DAY_REWARD_RISK = 2.0   # day-trade take-profit as a multiple of the stop distance
+
+
+def _pdt_allows_day_trade(equity: float) -> bool:
+    """US pattern-day-trader rule: under $25k equity, max 3 day trades per 5 days."""
+    if equity >= 25_000:
+        return True
+    try:
+        from app.services.trading_engine import broker
+        return broker.get_account().get("day_trade_count", 0) < 3
+    except Exception:
+        return True   # can't check (e.g. no keys); the broker enforces it anyway
+
 
 # ── Mode controls ─────────────────────────────────────────────────────────────
 
@@ -68,6 +82,10 @@ async def execute_signal(
     equity:             float,
     source:             str = "auto",
     quant_score:        float | None = None,
+    style:              str = "swing",
+    size_mult:          float = 1.0,
+    stop_mult_adj:      float = 0.0,
+    bias:               str | None = None,
 ) -> dict:
     """
     Evaluate a signal through the risk gate and submit an order if approved.
@@ -78,11 +96,22 @@ async def execute_signal(
         equity:              Current portfolio equity.
         source:              "auto" | "manual".
         quant_score:         Combined quant score (stored on the order for reference).
+        style:               "swing" (hold, ATR stop) or "day" (tight stop + take-profit
+                             bracket, flattened before the close).
+        size_mult:           Market-bias position-size multiplier (bear = 0.5).
+        stop_mult_adj:       Market-bias adjustment to the ATR stop multiplier.
     """
     result = {"ticker": signal.ticker, "direction": signal.direction, "action": None, "reason": None}
 
     if signal.direction == "HOLD":
         result.update(action="skip", reason="HOLD signal")
+        return result
+
+    is_day = style == "day" and signal.direction == "BUY"
+    if is_day:
+        source = "daytrade"
+    elif settings.day_trade_only and signal.direction == "BUY":
+        result.update(action="skip", reason="Day-trade-only mode: no qualifying intraday setup (no overnight/swing entries)")
         return result
 
     # ── Risk gate ─────────────────────────────────────────────────────────────
@@ -114,8 +143,12 @@ async def execute_signal(
         live_positions = []
     held = next((p for p in live_positions if p["ticker"] == signal.ticker), None)
 
+    if is_day and held is None and not _pdt_allows_day_trade(equity):
+        result.update(action="skip", reason="Pattern-day-trader limit: 3 day trades used and equity < $25k")
+        return result
+
     if settings.enable_options_trading:
-        return await _execute_options_signal(signal, price, equity, held, source, quant_score)
+        return await _execute_options_signal(signal, price, equity, held, source, quant_score, size_mult)
 
     side = "buy" if signal.direction == "BUY" else "sell"
 
@@ -128,9 +161,17 @@ async def execute_signal(
         return result
 
     atr      = stop_loss.calculate_atr(signal.ticker)
-    risk_pct = get_param("risk_per_trade_pct")
-    qty = position_sizer.atr_based_size(equity, price, atr, risk_pct=risk_pct) if atr > 0 \
-        else position_sizer.fixed_fraction_size(equity, price, risk_pct=risk_pct)
+    risk_pct = get_param("risk_per_trade_pct") * size_mult
+    if is_day:
+        # Day trade: stop ~0.6 ATR (roughly half a day's range), target 2R
+        stop_mult, target_mult = DAY_STOP_ATR, DAY_STOP_ATR * DAY_REWARD_RISK
+    else:
+        stop_mult = max(0.8, get_param("atr_stop_multiplier") + stop_mult_adj)
+        target_mult = None
+    if atr > 0:
+        qty = position_sizer.atr_based_size(equity, price, atr, risk_pct=risk_pct, stop_mult=stop_mult)
+    else:
+        qty = position_sizer.fixed_fraction_size(equity, price, risk_pct=risk_pct)
     qty = position_sizer.clamp_to_max(qty, price, equity)
 
     if qty <= 0:
@@ -148,19 +189,29 @@ async def execute_signal(
             f"[DRY RUN] Would {side.upper()} {qty}×{signal.ticker} "
             f"@~${price:.2f} (quant={quant_score})"
         )
-        result.update(action="dry_run", qty=qty, price=price,
-                      stop=stop_loss.atr_stop_price(price, atr, side))
+        result.update(action="dry_run", qty=qty, price=price, style=style,
+                      stop=stop_loss.atr_stop_price(price, atr, side, stop_mult))
         return result
 
     # ── Submit to Alpaca ──────────────────────────────────────────────────────
     try:
         from app.services.trading_engine import broker
-        order = broker.submit_market_order(signal.ticker, side, qty)
-        logger.info(f"[{source.upper()}] Order submitted: {order}")
-
-        stop_price = stop_loss.atr_stop_price(price, atr, side)
+        stop_price = stop_loss.atr_stop_price(price, atr, side, stop_mult)
         stop_side  = "sell" if side == "buy" else "buy"
-        broker.submit_stop_order(signal.ticker, stop_side, qty, stop_price)
+
+        order = None
+        if is_day and atr > 0:
+            target = stop_loss.atr_target_price(price, atr, target_mult, side)
+            try:
+                order = broker.submit_bracket_order(signal.ticker, qty, stop_price, target)
+                logger.info(f"[DAYTRADE] Bracket submitted {signal.ticker} x{qty} stop={stop_price} tp={target}")
+            except Exception as e:
+                logger.warning(f"Bracket order failed for {signal.ticker} ({e}) — falling back to market+stop")
+                order = None
+        if order is None:
+            order = broker.submit_market_order(signal.ticker, side, qty)
+            logger.info(f"[{source.upper()}] Order submitted: {order}")
+            broker.submit_stop_order(signal.ticker, stop_side, qty, stop_price)
 
         # Persist order with source tag
         await _save_order(
@@ -168,6 +219,14 @@ async def execute_signal(
             stop_price=stop_price, signal_id=None, source=source,
             quant_score=quant_score,
         )
+
+        if is_day:
+            from app.services.trading_engine import day_journal
+            await day_journal.open_trade(
+                signal.ticker, qty, price, stop_price,
+                stop_loss.atr_target_price(price, atr, target_mult, side) if atr > 0 else None,
+                bias=bias, quant_score=quant_score,
+            )
 
         result.update(action="submitted", order=str(order), stop_price=stop_price)
     except Exception as e:
@@ -207,6 +266,7 @@ async def _execute_options_signal(
     held:        dict | None,
     source:      str,
     quant_score: float | None,
+    size_mult:   float = 1.0,
 ) -> dict:
     """
     Options path for execute_signal — used when settings.enable_options_trading
@@ -262,7 +322,7 @@ async def _execute_options_signal(
         result.update(action="skip", reason="Contract has no bid/ask — illiquid, skipping")
         return result
 
-    risk_pct = get_param("risk_per_trade_pct")
+    risk_pct = get_param("risk_per_trade_pct") * size_mult
     qty = options_engine.contract_size(equity, premium, risk_pct, settings.max_position_pct)
     if qty <= 0:
         result.update(action="skip", reason="Options sizer returned 0 contracts (premium too high for risk budget)")

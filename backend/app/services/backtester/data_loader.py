@@ -17,8 +17,12 @@ def load_ohlcv(ticker: str, start: str, end: str, interval: str = "1d") -> pd.Da
             age_h = (pd.Timestamp.now() - pd.Timestamp(os.path.getmtime(cache_path), unit="s")).total_seconds() / 3600
             if age_h < 24:
                 df = pd.read_parquet(cache_path)
-                mask = (df.index >= pd.Timestamp(start)) & (df.index <= pd.Timestamp(end))
-                return df[mask]
+                # Only trust the cache if it spans the requested window (it holds whatever
+                # range was fetched last) — otherwise long backtests silently get truncated.
+                if (not df.empty and df.index.min() <= pd.Timestamp(start) + pd.Timedelta(days=7)
+                        and df.index.max() >= pd.Timestamp(end) - pd.Timedelta(days=7)):
+                    mask = (df.index >= pd.Timestamp(start)) & (df.index <= pd.Timestamp(end))
+                    return df[mask]
     except Exception:
         pass
 
@@ -27,7 +31,10 @@ def load_ohlcv(ticker: str, start: str, end: str, interval: str = "1d") -> pd.Da
     if df.empty:
         return df
     df.columns = [c.lower() if isinstance(c, str) else c[0].lower() for c in df.columns]
-    df.to_parquet(cache_path)
+    try:
+        df.to_parquet(cache_path)
+    except Exception:
+        pass
     return df
 
 
