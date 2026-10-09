@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import logging
 from app.services.backtester.data_loader import load_ohlcv, load_intraday_ohlcv
-from app.services.backtester.strategy import NLPProxyStrategy, TechnicalStrategy, IntradayORBVWAPStrategy, BaseStrategy
+from app.services.backtester.strategy import NLPProxyStrategy, TechnicalStrategy, IntradayORBVWAPStrategy, RegimeAdaptiveStrategy, BaseStrategy
 from app.services.backtester.metrics import compute_metrics
 
 logger = logging.getLogger(__name__)
@@ -11,6 +11,7 @@ STRATEGIES = {
     "nlp_proxy":    NLPProxyStrategy,
     "sma_crossover": TechnicalStrategy,
     "intraday_orb": IntradayORBVWAPStrategy,
+    "regime_adaptive": RegimeAdaptiveStrategy,
 }
 
 
@@ -50,7 +51,12 @@ def run_backtest(
     if not all_equity:
         return {"error": "No data available for any ticker"}
 
-    combined_equity = sum(all_equity) if len(all_equity) > 1 else all_equity[0]
+    # Tickers can start on different dates (IPOs): align on the union of dates and hold
+    # each one at its starting capital until it has data, instead of summing to NaN.
+    combined_equity = (
+        pd.concat(all_equity, axis=1).sort_index().ffill().bfill().sum(axis=1)
+        if len(all_equity) > 1 else all_equity[0]
+    )
     combined_trades = pd.concat(all_trades) if all_trades else pd.DataFrame()
     metrics = compute_metrics(combined_equity, combined_trades)
     trade_log = _trades_to_log(combined_trades)

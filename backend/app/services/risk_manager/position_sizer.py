@@ -14,11 +14,12 @@ def fixed_fraction_size(equity: float, current_price: float, risk_pct: float | N
     return max(shares, 1)
 
 
-def atr_based_size(equity: float, current_price: float, atr: float, risk_pct: float | None = None) -> int:
-    """Size position so that 2*ATR stop = risk_pct of equity."""
+def atr_based_size(equity: float, current_price: float, atr: float, risk_pct: float | None = None,
+                   stop_mult: float = 2.0) -> int:
+    """Size position so that a stop_mult*ATR stop loses risk_pct of equity."""
     pct = risk_pct if risk_pct is not None else settings.risk_per_trade_pct
     risk_amount = equity * pct
-    stop_distance = 2.0 * atr
+    stop_distance = stop_mult * atr
     if stop_distance <= 0 or current_price <= 0:
         return fixed_fraction_size(equity, current_price, risk_pct=pct)
     shares = int(risk_amount / stop_distance)

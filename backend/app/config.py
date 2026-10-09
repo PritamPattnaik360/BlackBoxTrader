@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # bearish view is expressed by buying a put, not shorting shares).
     enable_options_trading: bool = False
 
+    # Day-trade-only mode (default): autonomous BUYs are only opened as intraday
+    # trades — tight stop, same-day take-profit, flattened before the close — and
+    # never held overnight. Set DAY_TRADE_ONLY=false to also allow multi-day swing positions.
+    day_trade_only: bool = True
+
     # Autonomous trading â€” set AUTO_START_AUTONOMOUS=true in .env to enable on boot
     auto_start_autonomous: bool = False
 

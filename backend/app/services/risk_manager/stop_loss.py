@@ -21,12 +21,23 @@ def calculate_atr(ticker: str, period: int = 14) -> float:
         return 0.0
 
 
-def atr_stop_price(entry_price: float, atr: float, side: str = "buy") -> float:
-    mult = settings.default_stop_atr_multiplier
+def atr_stop_price(entry_price: float, atr: float, side: str = "buy", mult: float | None = None) -> float:
+    """ATR stop. `mult` defaults to the adaptive engine's learned multiplier
+    (which the regime overlay adjusts), not the static config value."""
+    if mult is None:
+        from app.services.adaptive.adaptive_engine import get_param
+        mult = get_param("atr_stop_multiplier")
     if side == "buy":
         return round(entry_price - mult * atr, 2)
     else:
         return round(entry_price + mult * atr, 2)
+
+
+def atr_target_price(entry_price: float, atr: float, mult: float, side: str = "buy") -> float:
+    """Take-profit `mult` ATRs away from entry."""
+    if side == "buy":
+        return round(entry_price + mult * atr, 2)
+    return round(entry_price - mult * atr, 2)
 
 
 def fixed_pct_stop(entry_price: float, pct: float = 0.02, side: str = "buy") -> float:

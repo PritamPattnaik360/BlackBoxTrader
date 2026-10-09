@@ -3,6 +3,8 @@ import { getPortfolio } from '../api/portfolio'
 import { getSignals } from '../api/signals'
 import { getOrders } from '../api/orders'
 import { useTradingStore } from '../store/tradingStore'
+import MarketBiasPanel from '../components/strategy/MarketBiasPanel'
+import DayTradeJournal from '../components/strategy/DayTradeJournal'
 import { TrendingUp, DollarSign, Activity, Info } from 'lucide-react'
 import dayjs from 'dayjs'
 
@@ -59,6 +61,10 @@ export default function Dashboard() {
           <span className="font-semibold">Alpaca connection error: </span>{portfolioError}
         </div>
       )}
+
+      <MarketBiasPanel />
+
+      <DayTradeJournal />
 
       {/* Account cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
