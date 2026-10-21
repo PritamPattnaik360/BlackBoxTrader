@@ -49,9 +49,10 @@ export default function Dashboard() {
       <div>
         <h1 className="text-xl font-semibold mb-3">Dashboard</h1>
         <ExplainBox>
-          Live overview of your paper-trading account. <strong className="text-gray-300">Portfolio Value</strong> and <strong className="text-gray-300">Open Positions</strong> refresh every 30 seconds via Alpaca.
-          <strong className="text-gray-300"> Recent Signals</strong> are the latest AI decisions from the scanner (NLP + quant).
-          When <strong className="text-gray-300">Autopilot</strong> is on (Settings), signals above ±0.30 automatically place orders — you'll see them appear in Recent Orders within seconds.
+          Live overview of your Alpaca account. <strong className="text-gray-300">Portfolio Value</strong> and <strong className="text-gray-300">Open Positions</strong> refresh every 30 seconds.
+          The <strong className="text-gray-300">Market Bias</strong> panel shows whether the bot currently sees a bull, neutral or bear market and which algorithm mix it is using.
+          <strong className="text-gray-300"> Recent Signals</strong> are the latest decisions from the scanner (watchlist plus the best S&amp;P 500 / growth-stock picks).
+          When <strong className="text-gray-300">Autopilot</strong> is on, BUY signals that clear the current threshold open <strong className="text-gray-300">day trades</strong> (stop + take-profit, closed by 15:50 ET) and are logged in the Day-Trade Journal.
         </ExplainBox>
       </div>
 
@@ -91,6 +92,7 @@ export default function Dashboard() {
         <div className="bg-gray-900 rounded-xl border border-gray-800">
           <div className="px-4 py-3 border-b border-gray-800 text-sm font-medium flex items-center gap-2">
             <TrendingUp size={14} /> Open Positions
+            {positions.length > 5 && <span className="text-xs text-gray-500 font-normal">(showing 5 of {positions.length})</span>}
           </div>
           <div className="divide-y divide-gray-800">
             {positions.slice(0, 5).map((p: any) => {

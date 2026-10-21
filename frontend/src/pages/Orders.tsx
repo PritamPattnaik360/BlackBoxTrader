@@ -31,11 +31,11 @@ export default function Orders() {
       <div>
         <h1 className="text-xl font-semibold mb-3">Orders</h1>
         <ExplainBox>
-          All orders placed on your Alpaca paper account, auto-refreshed every 15 seconds.
-          <strong className="text-gray-300"> Auto</strong> orders are placed by the bot when Autopilot is enabled and a signal crosses the ±0.30 threshold.
-          <strong className="text-gray-300"> Manual</strong> orders let you bypass the AI and trade any ticker directly — useful for testing or overriding a position.
+          All orders on your Alpaca account, auto-refreshed every 15 seconds.
+          <strong className="text-gray-300"> Day trade</strong> entries are placed by the bot as a market order with an attached stop-loss and take-profit (you'll see the extra stop / limit legs listed too).
+          <strong className="text-gray-300"> Auto</strong> and <strong className="text-gray-300">Learning</strong> orders are other bot orders, and <strong className="text-gray-300">Manual</strong> orders let you bypass the AI and trade any ticker directly.
           You can cancel any pending or accepted order using the <strong className="text-gray-300">✕</strong> button before it fills.
-          All orders are <strong className="text-gray-300">market orders</strong> submitted at the next available price.
+          Entries are <strong className="text-gray-300">market orders</strong> at the next available price; exits can also be stop or limit orders.
         </ExplainBox>
       </div>
 
@@ -93,6 +93,7 @@ export default function Orders() {
                 <th className="px-4 py-2 text-left">Side</th>
                 <th className="px-4 py-2 text-right">Qty</th>
                 <th className="px-4 py-2 text-left">Type</th>
+                <th className="px-4 py-2 text-left">Source</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="px-4 py-2 text-right">Fill Price</th>
                 <th className="px-4 py-2 text-left">Submitted</th>
@@ -106,6 +107,13 @@ export default function Orders() {
                   <td className={`px-4 py-3 font-medium ${o.side === 'buy' ? 'text-green-400' : 'text-red-400'}`}>{o.side.toUpperCase()}</td>
                   <td className="px-4 py-3 text-right">{o.qty}</td>
                   <td className="px-4 py-3 text-gray-400">{o.order_type}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded text-xs ${
+                      o.source === 'daytrade' ? 'bg-yellow-900 text-yellow-300' :
+                      o.source === 'manual' ? 'bg-gray-800 text-gray-300' :
+                      'bg-blue-900/60 text-blue-300'
+                    }`}>{o.source === 'daytrade' ? 'day trade' : o.source}</span>
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded text-xs ${
                       o.status === 'filled' ? 'bg-green-900 text-green-300' :
@@ -129,7 +137,7 @@ export default function Orders() {
                 </tr>
               ))}
               {(!orders || orders.length === 0) && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No orders yet</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-500">No orders yet</td></tr>
               )}
             </tbody>
           </table>

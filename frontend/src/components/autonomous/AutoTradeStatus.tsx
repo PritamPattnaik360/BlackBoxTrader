@@ -1,11 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getTradingMode, setAutonomousMode } from '../../api/settings'
+import { getStrategyContext } from '../../api/strategy'
 import { useState } from 'react'
 import { Bot, AlertTriangle, CheckCircle, Clock, XCircle } from 'lucide-react'
+
+const WEIGHT_LABELS: Record<string, string> = {
+  intraday: 'Intraday (VWAP/ORB)', nlp: 'News sentiment', momentum: 'Momentum (12-1 mo)',
+  mean_reversion: 'Mean reversion', technical: 'Technical (RSI/MACD/EMA)', trendlines: 'Trend lines', llm: 'Local LLM',
+}
 
 export default function AutoTradeStatus() {
   const qc = useQueryClient()
   const { data: mode } = useQuery({ queryKey: ['tradingMode'], queryFn: getTradingMode, refetchInterval: 5_000 })
+  const { data: strat } = useQuery({ queryKey: ['strategyContext'], queryFn: getStrategyContext, refetchInterval: 60_000 })
 
   const [liveConfirmModal, setLiveConfirmModal] = useState(false)
   const [confirmText, setConfirmText] = useState('')
@@ -96,8 +103,8 @@ export default function AutoTradeStatus() {
             <p className="text-xs opacity-80">
               BlackBoxTrader scans signals every 5 min.{' '}
               {marketOpen
-                ? 'Market is open — orders are being submitted automatically. If all signals are neutral, a forced learning trade is placed on the highest-scoring ticker.'
-                : 'Market is closed — signals are generated but no orders are placed. Forced learning trades are suppressed until the market reopens.'}
+                ? 'Market is open — qualifying BUY signals are opened automatically as day trades (stop + take-profit) and closed by 15:50 ET. If nothing qualifies, a small learning trade may be placed (not in a bear market).'
+                : 'Market is closed — signals are generated but no orders are placed. Open day trades were closed at 15:50 ET.'}
               {' '}You can still place manual trades below.
             </p>
           </div>
@@ -114,27 +121,28 @@ export default function AutoTradeStatus() {
           </div>
         )}
 
-        {/* What the quant model uses */}
+        {/* What the quant model uses — live from the backend, so it matches the active bias and learned weights */}
         <div className="bg-gray-800 rounded-lg p-3">
-          <div className="text-xs font-medium text-gray-400 mb-2">Quant model signal weights</div>
+          <div className="text-xs font-medium text-gray-400 mb-2">
+            Signal weights — {strat ? `${strat.context.bias} market profile` : 'loading…'}
+            {marketOpen ? ' (market hours: intraday mix)' : ' (market closed: daily mix)'}
+          </div>
           <div className="space-y-1.5">
-            {[
-              { label: 'News sentiment (NLP)', pct: 35, color: 'bg-purple-500' },
-              { label: 'Momentum (12-1 month)', pct: 30, color: 'bg-blue-500' },
-              { label: 'Mean reversion (Bollinger/OU)', pct: 20, color: 'bg-green-500' },
-              { label: 'Technical (RSI + MACD + EMA)', pct: 15, color: 'bg-yellow-500' },
-            ].map(row => (
-              <div key={row.label} className="flex items-center gap-2">
-                <div className="w-28 text-xs text-gray-400 shrink-0">{row.label}</div>
-                <div className="flex-1 bg-gray-700 rounded-full h-1.5">
-                  <div className={`${row.color} h-1.5 rounded-full`} style={{ width: `${row.pct}%` }} />
+            {strat && Object.entries(marketOpen ? strat.profile.intraday_weights : strat.profile.daily_weights)
+              .sort((a, b) => b[1] - a[1])
+              .map(([key, w]) => (
+                <div key={key} className="flex items-center gap-2">
+                  <div className="w-28 text-xs text-gray-400 shrink-0">{WEIGHT_LABELS[key] ?? key}</div>
+                  <div className="flex-1 bg-gray-700 rounded-full h-1.5">
+                    <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${Math.min(100, w * 100 / 0.4)}%` }} />
+                  </div>
+                  <div className="text-xs text-gray-400 w-8 text-right">{(w * 100).toFixed(0)}%</div>
                 </div>
-                <div className="text-xs text-gray-400 w-8 text-right">{row.pct}%</div>
-              </div>
-            ))}
+              ))}
           </div>
           <div className="mt-2 text-xs text-gray-500">
-            Position size: Kelly criterion (adaptive from trade history) · Stop: 2× ATR trailing
+            Position size: risk-per-trade × {strat ? `${(strat.profile.size_multiplier * 100).toFixed(0)}%` : '…'} bias multiplier ÷ ATR stop distance ·
+            Day trades: bracket order with ~0.6 ATR stop and take-profit, closed by 15:50 ET · Weights are re-tuned nightly from results
           </div>
         </div>
 

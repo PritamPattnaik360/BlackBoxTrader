@@ -164,7 +164,9 @@ async def execute_signal(
     risk_pct = get_param("risk_per_trade_pct") * size_mult
     if is_day:
         # Day trade: stop ~0.6 ATR (roughly half a day's range), target 2R
-        stop_mult, target_mult = DAY_STOP_ATR, DAY_STOP_ATR * DAY_REWARD_RISK
+        from app.services.adaptive.daily_learner import get_day_params
+        dp = get_day_params()          # learned nightly; defaults are DAY_STOP_ATR / DAY_REWARD_RISK
+        stop_mult, target_mult = dp["stop_atr"], dp["stop_atr"] * dp["reward_risk"]
     else:
         stop_mult = max(0.8, get_param("atr_stop_multiplier") + stop_mult_adj)
         target_mult = None

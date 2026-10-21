@@ -1,0 +1,134 @@
+{
+  "day": {
+    "min_intraday_score": 0.15,
+    "reward_risk": 1.2,
+    "stop_atr": 0.6
+  },
+  "history": [
+    {
+      "date": "2026-10-12",
+      "report": [
+        "weights bull/daily: n=1856 - momentum 0.32->0.30 (IC -0.19), trendlines 0.18->0.17 (IC -0.24)",
+        "weights bull/intraday: 504 samples over 2d (need 60 over 3d) - unchanged",
+        "weights neutral/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights neutral/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "day-trade tuning skipped: 19/15 closed trades over 2/3 days"
+      ]
+    },
+    {
+      "date": "2026-10-13",
+      "report": [
+        "weights bull/daily: n=2295 - momentum 0.30->0.29 (IC -0.11), trendlines 0.17->0.15 (IC -0.23)",
+        "weights bull/intraday: n=754 - intraday 0.40->0.41 (IC +0.05), trendlines 0.12->0.11 (IC -0.05)",
+        "weights neutral/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights neutral/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "targets hit only 0% while EOD exits are profitable -> reward:risk 1.8",
+        "net P&L $-128 over 25 trades -> require intraday score >= 0.05"
+      ]
+    },
+    {
+      "date": "2026-10-14",
+      "report": [
+        "weights bull/daily: n=2755 - technical 0.18->0.17 (IC -0.10), trendlines 0.15->0.14 (IC -0.23)",
+        "weights bull/intraday: n=1006 - intraday 0.41->0.45 (IC +0.12), momentum 0.16->0.15 (IC -0.02), technical 0.10->0.09 (IC -0.02), trendlines 0.11->0.10 (IC -0.04)",
+        "weights neutral/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights neutral/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "targets hit only 0% while EOD exits are profitable -> reward:risk 1.62",
+        "net P&L $-207 over 28 trades -> require intraday score >= 0.1"
+      ]
+    },
+    {
+      "date": "2026-10-15",
+      "report": [
+        "weights bull/daily: n=3215 - technical 0.17->0.16 (IC -0.10), trendlines 0.14->0.13 (IC -0.26)",
+        "weights bull/intraday: n=1268 - intraday 0.45->0.48 (IC +0.12), technical 0.09->0.08 (IC -0.09), trendlines 0.10->0.09 (IC -0.13)",
+        "weights neutral/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights neutral/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "targets hit only 0% while EOD exits are profitable -> reward:risk 1.458"
+      ]
+    },
+    {
+      "date": "2026-10-16",
+      "report": [
+        "weights bull/daily: n=3655 - trendlines 0.13->0.11 (IC -0.18)",
+        "weights bull/intraday: n=1421 - intraday 0.48->0.52 (IC +0.13), momentum 0.14->0.13 (IC -0.02), trendlines 0.09->0.08 (IC -0.05)",
+        "weights neutral/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights neutral/intraday: 111 samples over 1d (need 60 over 3d) - unchanged",
+        "weights bear/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "targets hit only 0% while EOD exits are profitable -> reward:risk 1.312"
+      ]
+    },
+    {
+      "date": "2026-10-19",
+      "report": [
+        "weights bull/daily: n=3683 - trendlines 0.11->0.10 (IC -0.18)",
+        "weights bull/intraday: n=1641 - intraday 0.52->0.55 (IC +0.11), momentum 0.13->0.12 (IC -0.05)",
+        "weights neutral/daily: n=1628 - momentum 0.26->0.24 (IC -0.15), technical 0.13->0.12 (IC -0.14), trendlines 0.12->0.11 (IC -0.17)",
+        "weights neutral/intraday: 151 samples over 2d (need 60 over 3d) - unchanged",
+        "weights bear/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "targets hit only 0% while EOD exits are profitable -> reward:risk 1.2"
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "report": [
+        "weights bull/daily: n=3683 - momentum 0.28->0.27 (IC -0.06), technical 0.15->0.15 (IC -0.07), trendlines 0.10->0.09 (IC -0.18)",
+        "weights bull/intraday: n=1868 - intraday 0.55->0.57 (IC +0.09), momentum 0.12->0.11 (IC -0.05)",
+        "weights neutral/daily: n=2084 - momentum 0.24->0.22 (IC -0.14), trendlines 0.11->0.10 (IC -0.14)",
+        "weights neutral/intraday: n=194 - intraday 0.36->0.35 (IC -0.01), momentum 0.18->0.16 (IC -0.08), technical 0.09->0.10 (IC +0.08), trendlines 0.10->0.11 (IC +0.17)",
+        "weights bear/daily: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "weights bear/intraday: 0 samples over 0d (need 60 over 3d) - unchanged",
+        "targets hit only 0% while EOD exits are profitable -> reward:risk 1.2",
+        "net P&L $-192 over 55 trades -> require intraday score >= 0.15"
+      ]
+    }
+  ],
+  "updated": "2026-10-20T20:31:30.616233+00:00",
+  "version": 1,
+  "weights": {
+    "bull": {
+      "daily": {
+        "mean_reversion": 0.1818,
+        "momentum": 0.2737,
+        "nlp": 0.3031,
+        "technical": 0.1481,
+        "trendlines": 0.0933
+      },
+      "intraday": {
+        "intraday": 0.5679,
+        "mean_reversion": 0.0631,
+        "momentum": 0.1084,
+        "nlp": 0.1104,
+        "technical": 0.0759,
+        "trendlines": 0.0743
+      }
+    },
+    "neutral": {
+      "daily": {
+        "mean_reversion": 0.2056,
+        "momentum": 0.2179,
+        "nlp": 0.354,
+        "technical": 0.122,
+        "trendlines": 0.1005
+      },
+      "intraday": {
+        "intraday": 0.3543,
+        "mean_reversion": 0.0897,
+        "momentum": 0.1647,
+        "nlp": 0.1795,
+        "technical": 0.0972,
+        "trendlines": 0.1147
+      }
+    }
+  }
+}

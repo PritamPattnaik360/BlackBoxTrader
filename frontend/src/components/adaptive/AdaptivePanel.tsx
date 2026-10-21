@@ -120,7 +120,7 @@ export default function AdaptivePanel() {
       {perf && perf.total_outcomes === 0 && (
         <div className="text-xs text-gray-500 bg-gray-800 rounded-lg p-3">
           <Activity size={12} className="inline mr-1.5" />
-          No trade outcomes yet. The system will start learning once positions close.
+          No trade outcomes yet. The system learns as positions close; the nightly review (16:30 ET) re-weights algorithms once it has 3+ days of data.
         </div>
       )}
 
@@ -156,7 +156,6 @@ export default function AdaptivePanel() {
               />
               <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
               <Line type="monotone" dataKey="buy_signal_threshold"  stroke="#22c55e" dot={false} name="BUY thr" strokeWidth={1.5} />
-              <Line type="monotone" dataKey="news_weight"           stroke="#a78bfa" dot={false} name="News wt" strokeWidth={1.5} />
               <Line type="monotone" dataKey="risk_per_trade_pct"    stroke="#f59e0b" dot={false} name="Risk"    strokeWidth={1.5} />
             </LineChart>
           </ResponsiveContainer>
@@ -180,6 +179,7 @@ export default function AdaptivePanel() {
                   ev.event_type === 'regime_change'    ? 'text-yellow-400' :
                   ev.event_type === 'threshold_raised' ? 'text-orange-400' :
                   ev.event_type === 'weight_adjusted'  ? 'text-blue-400' :
+                  ev.event_type === 'daily_learning'   ? 'text-purple-300' :
                   'text-gray-300'
                 }>
                   {ev.description}

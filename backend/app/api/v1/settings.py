@@ -37,6 +37,9 @@ async def get_mode():
         "autonomous":      is_autonomous(),
         "alpaca_base_url": settings.alpaca_base_url,
         "market_open":     _market_open(),
+        "auto_start_autonomous": settings.auto_start_autonomous,
+        "day_trade_only":  settings.day_trade_only,
+        "llm_signal_enabled": settings.llm_signal_enabled,
     }
 
 

@@ -124,6 +124,30 @@ async def trigger_optimization(db: AsyncSession = Depends(get_db)):
         raise HTTPException(500, str(e))
 
 
+@router.get("/learned")
+async def get_learned():
+    """What the nightly learner has tuned so far: component weights, day-trade params, history."""
+    from app.services.adaptive import daily_learner
+    s = daily_learner.load_state()
+    return {"updated": s["updated"], "weights": s["weights"], "day": s["day"],
+            "history": s["history"][-14:], "defaults": daily_learner.DAY_DEFAULTS}
+
+
+@router.post("/daily-learning")
+async def run_learning_now(dry_run: bool = True):
+    """Run the nightly learning pass on demand. dry_run=true (default) reports without saving."""
+    from app.services.adaptive import daily_learner
+    return await daily_learner.run_daily_learning(dry_run=dry_run)
+
+
+@router.post("/learned/reset")
+async def reset_learned():
+    """Throw away everything learned and go back to the hand-set algorithm defaults."""
+    from app.services.adaptive import daily_learner
+    daily_learner.reset()
+    return {"status": "ok"}
+
+
 @router.post("/reset")
 async def reset_params(db: AsyncSession = Depends(get_db)):
     """Reset all adaptive parameters back to factory defaults."""

@@ -5,6 +5,7 @@ import api from '../../api/client'
 interface LlmStatus {
   ollama_running: boolean
   market_open: boolean
+  signal_enabled: boolean
   models: string[]
   default_model: string
   recommended_model: string
@@ -47,14 +48,16 @@ export default function LlmStatusPanel() {
             ? <CheckCircle size={13} className="text-green-400" />
             : <XCircle size={13} className="text-gray-500" />}
           <span className={`text-sm font-medium ${running ? 'text-green-300' : 'text-gray-400'}`}>
-            {!running
-              ? 'LLM Offline — signals use 4-factor model'
+            {!status?.signal_enabled
+              ? 'LLM Signal Paused — trading on the quant algorithms only'
+              : !running
+              ? 'LLM Offline — signals use the quant algorithms only'
               : status?.market_open
                 ? 'LLM Active — contributing to signals'
                 : 'LLM Standby — runs during market hours only'}
           </span>
         </div>
-        {running && !status?.market_open && (
+        {status?.signal_enabled && running && !status?.market_open && (
           <div className="text-xs text-gray-500 mt-1">
             Market is closed (Mon–Fri 9:30–16:00 ET). The LLM signal resumes at the next open.
           </div>
@@ -64,9 +67,16 @@ export default function LlmStatusPanel() {
             Models: {status.models.join(', ')}
           </div>
         )}
-        {!running && (
+        {!status?.signal_enabled && (
+          <div className="text-xs text-gray-500 mt-2">
+            Paused because local inference was too slow for trading (~15s per ticker). To turn it back on, set{' '}
+            <code className="bg-gray-900 px-1 rounded">LLM_SIGNAL_ENABLED=true</code> in <code className="bg-gray-900 px-1 rounded">backend/.env</code> and restart the backend.
+            The AI advisor chat is unaffected.
+          </div>
+        )}
+        {status?.signal_enabled && !running && (
           <div className="text-xs text-gray-500 mt-2 space-y-1">
-            <div>To enable the LLM signal (5th alpha source, 20% weight):</div>
+            <div>To use the LLM signal (extra input, 20% weight, market hours only):</div>
             <div className="bg-gray-900 rounded px-2 py-1 font-mono text-gray-300">
               1. Download Ollama from ollama.com/download
             </div>
@@ -80,7 +90,7 @@ export default function LlmStatusPanel() {
 
       {/* Training data */}
       <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3">
-        <div className="text-xs font-medium text-gray-400 mb-2">Training Data (stored in local DB)</div>
+        <div className="text-xs font-medium text-gray-400 mb-2">Training Data (local DB, exported to data/training/ on git push)</div>
         <div className="grid grid-cols-3 gap-3 text-center mb-3">
           <div>
             <div className="text-lg font-bold text-white">{training?.total_samples ?? 0}</div>

@@ -5,11 +5,20 @@ from app.services.market_data.cache import set_quote, publish_quote
 
 logger = logging.getLogger(__name__)
 _stream = None
+_stream_task: asyncio.Task | None = None
 _subscribed_tickers: set[str] = set()
 
 
+def _on_stream_done(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error(f"Alpaca stream stopped unexpectedly: {exc!r}")
+
+
 async def start_stream(tickers: list[str]) -> None:
-    global _stream, _subscribed_tickers
+    global _stream, _stream_task, _subscribed_tickers
     if not settings.alpaca_api_key:
         logger.warning("Alpaca API key not set — market data stream disabled")
         return
@@ -29,25 +38,34 @@ async def start_stream(tickers: list[str]) -> None:
                 "close": float(bar.close),
                 "volume": int(bar.volume),
             }
-            set_quote(bar.symbol, data)
+            set_quote(bar.symbol, data, ttl=300)   # bars arrive ~1/min; keep the last one around
             publish_quote(bar.symbol, data)
 
         _stream.subscribe_bars(on_bar, *tickers)
         _subscribed_tickers = set(tickers)
-        asyncio.create_task(_stream.run())
+        # StockDataStream.run() is blocking and starts its own event loop via
+        # asyncio.run(), which can't be called inside FastAPI's running loop (and its
+        # cleanup then fails with "'NoneType' object has no attribute 'is_running'").
+        # Inside an existing loop, run the stream's coroutine as a task instead.
+        _stream_task = asyncio.create_task(_stream._run_forever())
+        _stream_task.add_done_callback(_on_stream_done)
         logger.info(f"Alpaca stream started for {tickers}")
     except Exception as e:
         logger.error(f"Failed to start Alpaca stream: {e}")
 
 
 async def stop_stream() -> None:
-    global _stream
+    global _stream, _stream_task
     if _stream:
         try:
-            await _stream.stop()
+            await _stream.stop_ws()   # async, safe inside the running loop (stop() is sync)
+            if _stream_task:
+                await asyncio.wait_for(_stream_task, timeout=5)
         except Exception:
-            pass
+            if _stream_task:
+                _stream_task.cancel()
         _stream = None
+        _stream_task = None
 
 
 async def add_ticker(ticker: str) -> None:
@@ -62,7 +80,7 @@ async def add_ticker(ticker: str) -> None:
                 "close": float(bar.close),
                 "volume": int(bar.volume),
             }
-            set_quote(bar.symbol, data)
+            set_quote(bar.symbol, data, ttl=300)
             publish_quote(bar.symbol, data)
 
         _stream.subscribe_bars(on_bar, ticker)

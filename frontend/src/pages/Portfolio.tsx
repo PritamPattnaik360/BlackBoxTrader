@@ -28,9 +28,9 @@ export default function Portfolio() {
       <div>
         <h1 className="text-xl font-semibold mb-3">Portfolio</h1>
         <ExplainBox>
-          Your Alpaca paper-trading account snapshot. The <strong className="text-gray-300">Equity Curve</strong> shows how your total account value has changed over time — pulled directly from Alpaca's portfolio history endpoint.
-          <strong className="text-gray-300"> Live Price</strong> in the positions table is updated in real time via WebSocket; <strong className="text-gray-300">Unrealized P&L</strong> recalculates every tick.
-          Positions are sized by the risk engine: 1% of equity risked per trade, divided by 2× ATR.
+          Your Alpaca account snapshot. The <strong className="text-gray-300">Equity Curve</strong> shows how your total account value has changed over time — pulled directly from Alpaca's portfolio history endpoint.
+          <strong className="text-gray-300"> Live Price</strong> updates with each 1-minute bar for watchlist tickers (other positions refresh about once a minute); <strong className="text-gray-300">Unrealized P&L</strong> recalculates with it.
+          Positions are sized by the risk engine: the adaptive risk-per-trade % (default 1%, scaled by the market bias) divided by the ATR stop distance. Day trades are closed by 15:50 ET; older swing positions stay until sold.
         </ExplainBox>
       </div>
 
@@ -54,7 +54,7 @@ export default function Portfolio() {
           <div className="text-xs text-yellow-400">
             Alpaca is connected but your paper account has no positions yet. Make sure{' '}
             <strong>Auto Pilot is ON</strong> in Settings and market hours are active (Mon–Fri 9:30–16:00 ET).
-            The system will place its first trade on the next scan cycle.
+            The bot opens a position only when a BUY signal with a live intraday setup clears its threshold, so it can be quiet for a while.
           </div>
         </div>
       )}
@@ -109,7 +109,7 @@ export default function Portfolio() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {positions.map((p) => {
+              {positions.map((p: any) => {
                 const live = prices[p.ticker]?.close ?? p.current_price
                 const pnl = (live - p.avg_entry_price) * p.qty
                 const pnlPct = ((live - p.avg_entry_price) / p.avg_entry_price) * 100

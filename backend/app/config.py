@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     # never held overnight. Set DAY_TRADE_ONLY=false to also allow multi-day swing positions.
     day_trade_only: bool = True
 
+    # Local LLM trading signal (Ollama). Paused by default: ~15s/ticker made scans overrun
+    # their interval, and the quant algorithms carry the trading decision. When True it
+    # still only runs during market hours. The advisor chat is unaffected.
+    llm_signal_enabled: bool = False
+
+    # Nightly self-learning (component weights + day-trade stop/target tuning).
+    # See app/services/adaptive/daily_learner.py. Set LEARNING_ENABLED=false to freeze the algos.
+    learning_enabled: bool = True
+
     # Autonomous trading — set AUTO_START_AUTONOMOUS=true in .env to enable on boot
     auto_start_autonomous: bool = False
 

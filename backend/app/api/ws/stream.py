@@ -12,6 +12,7 @@ _connections: set[WebSocket] = set()
 async def live_stream(ws: WebSocket):
     await ws.accept()
     _connections.add(ws)
+    last_sent: dict[str, str] = {}   # ticker -> bar timestamp already sent on this connection
     try:
         while True:
             # Try Redis subscription first
@@ -33,6 +34,17 @@ async def live_stream(ws: WebSocket):
                 except Exception:
                     pass
             else:
+                # No Redis: the Alpaca feed writes bars to the in-process cache, so push
+                # any quote that changed since this client last saw it.
+                from app.services.market_data.cache import get_quote
+                for t in tickers:
+                    q = get_quote(t)
+                    if q and last_sent.get(t) != q.get("time"):
+                        last_sent[t] = q.get("time")
+                        try:
+                            await ws.send_text(json.dumps(q))
+                        except Exception:
+                            return
                 await asyncio.sleep(2)
 
             # Keepalive ping

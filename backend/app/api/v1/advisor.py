@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 
 from app.db.session import get_db
+from app.config import settings
 from app.services.advisor import llm_signal
 from app.models.advisor import LlmTrainingSample
 
@@ -45,6 +46,7 @@ async def get_status():
     return {
         "ollama_running": available,
         "market_open": _market_is_open(),   # the LLM trading signal only runs while True
+        "signal_enabled": settings.llm_signal_enabled,
         "models": models,
         "default_model": llm_signal.DEFAULT_MODEL,
         "setup_url": "https://ollama.com/download",

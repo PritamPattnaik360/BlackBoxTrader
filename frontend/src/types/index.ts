@@ -78,6 +78,9 @@ export interface TradingMode {
   autonomous: boolean
   alpaca_base_url: string
   market_open: boolean
+  auto_start_autonomous?: boolean
+  day_trade_only?: boolean
+  llm_signal_enabled?: boolean
 }
 
 export interface Order {
@@ -90,7 +93,7 @@ export interface Order {
   status: string
   filled_qty: number | null
   filled_avg_price: number | null
-  source: 'auto' | 'manual'
+  source: 'auto' | 'manual' | 'daytrade' | 'learning'
   quant_score: number | null
   submitted_at: string
   filled_at: string | null

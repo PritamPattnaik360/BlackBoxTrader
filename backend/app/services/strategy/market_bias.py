@@ -154,7 +154,24 @@ def get_context() -> dict:
 
 
 def get_profile(bias: str | None = None) -> Profile:
-    return PROFILES.get(bias or get_bias(), PROFILES["neutral"])
+    """Profile for the bias, with any weights the daily learner has tuned applied."""
+    base = PROFILES.get(bias or get_bias(), PROFILES["neutral"])
+    try:
+        from dataclasses import replace
+        from app.services.adaptive.daily_learner import get_learned_weights
+        daily = get_learned_weights(base.name, "daily")
+        intra = get_learned_weights(base.name, "intraday")
+        # Only accept learned weights whose components still match the profile
+        if daily and set(daily) != set(base.daily_weights):
+            daily = None
+        if intra and set(intra) != set(base.intraday_weights):
+            intra = None
+        if daily or intra:
+            return replace(base, daily_weights=daily or base.daily_weights,
+                           intraday_weights=intra or base.intraday_weights)
+    except Exception as e:
+        logger.debug(f"Learned weights unavailable, using defaults: {e}")
+    return base
 
 
 def with_llm(weights: dict, llm_share: float = 0.20) -> dict:

@@ -21,7 +21,7 @@ export default function Signals() {
     <div className="space-y-6">
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-xl font-semibold">NLP Signals</h1>
+          <h1 className="text-xl font-semibold">Signals</h1>
           <button
             onClick={() => scan.mutate()}
             disabled={scan.isPending}
@@ -32,10 +32,10 @@ export default function Signals() {
           </button>
         </div>
         <ExplainBox>
-          The AI scans every watchlist ticker every <strong className="text-gray-300">5 minutes</strong> during NYSE hours (9:30–16:00 ET).
-          Each signal is a <strong className="text-gray-300">composite score from −1 to +1</strong> blending FinBERT news sentiment (NLP), VWAP/ORB intraday patterns, 12-month momentum, Bollinger Band mean-reversion, and RSI/MACD technicals.
-          Scores above <strong className="text-gray-300">+0.30 = BUY</strong>, below <strong className="text-gray-300">−0.30 = SELL</strong>.
-          The 5 component bars show each factor's individual contribution. Hover "Scan Now" to trigger a manual scan outside the schedule.
+          The bot scans your watchlist plus the top S&amp;P 500 / growth-stock picks every <strong className="text-gray-300">5 minutes</strong>.
+          Each signal is a <strong className="text-gray-300">composite score from −1 to +1</strong> blending intraday patterns (VWAP, opening-range breakout, 5-min momentum), FinBERT news sentiment, 12-month momentum, mean-reversion, technicals and trend lines. The mix of weights depends on the <strong className="text-gray-300">market bias</strong> (bull / neutral / bear) shown on each signal.
+          The BUY / SELL thresholds are <strong className="text-gray-300">adaptive</strong> — they start at ±0.30, are shifted by the market bias and re-tuned from results — so each signal lists the thresholds it was judged against.
+          A BUY with a live intraday setup during market hours is a <strong className="text-gray-300">DAY</strong> trade (closed the same day). Click "Scan Now" to run a scan outside the schedule.
         </ExplainBox>
       </div>
 
@@ -69,17 +69,20 @@ export default function Signals() {
 
               {/* Quant component breakdown */}
               {s.raw_headlines && (s.raw_headlines as any)?._quant && (
-                <div className="grid grid-cols-5 gap-2 my-2">
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 my-2">
                   {[
-                    { label: 'NLP', key: 'nlp' },
+                    { label: 'Intraday', key: 'intraday' },
                     { label: 'Momentum', key: 'momentum' },
                     { label: 'Mean Rev', key: 'mean_reversion' },
                     { label: 'Technical', key: 'technical' },
-                    { label: 'LLM', key: 'llm' },
+                    { label: 'Trend', key: 'trendlines' },
+                    { label: 'News', key: 'nlp' },
+                    ...(((s.raw_headlines as any)._quant?.llm_active) ? [{ label: 'LLM', key: 'llm' }] : []),
                   ].map(({ label, key }) => {
                     const quant = (s.raw_headlines as any)._quant
                     const val: number | undefined = quant?.[key]
-                    const active = key !== 'llm' || quant?.llm_active
+                    // Intraday only counts during market hours
+                    const active = key !== 'intraday' || quant?.mode === 'intraday'
                     return (
                       <div key={key} className={`text-center rounded p-1.5 ${active ? 'bg-gray-800' : 'bg-gray-800/40'}`}>
                         <div className={`text-xs font-mono ${val == null || !active ? 'text-gray-600' : val >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -91,6 +94,24 @@ export default function Signals() {
                   })}
                 </div>
               )}
+
+              {(s.raw_headlines as any)?._quant && (() => {
+                const q = (s.raw_headlines as any)._quant
+                return (
+                  <div className="flex flex-wrap items-center gap-2 text-xs mb-2">
+                    {q.bias && (
+                      <span className={`px-2 py-0.5 rounded-full ${q.bias === 'bull' ? 'bg-green-900/60 text-green-300' : q.bias === 'bear' ? 'bg-red-900/60 text-red-300' : 'bg-gray-800 text-gray-300'}`}>
+                        {q.bias} market
+                      </span>
+                    )}
+                    {q.trade_style === 'day' && <span className="px-2 py-0.5 rounded-full bg-yellow-900/60 text-yellow-300">DAY trade</span>}
+                    {q.breakout_mode && <span className="px-2 py-0.5 rounded-full bg-blue-900/60 text-blue-300">breakout</span>}
+                    {q.buy_threshold != null && (
+                      <span className="text-gray-500">BUY ≥ {q.buy_threshold.toFixed(2)} · SELL ≤ {q.sell_threshold.toFixed(2)}</span>
+                    )}
+                  </div>
+                )
+              })()}
 
               <div className="flex gap-4 text-xs text-gray-400 mb-2">
                 <span>News: <span className={s.news_score != null ? (s.news_score >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-500'}>{s.news_score != null ? s.news_score.toFixed(3) : 'n/a'}</span></span>
@@ -113,7 +134,7 @@ export default function Signals() {
           ))}
           {(!signals || signals.length === 0) && !isLoading && (
             <div className="px-4 py-12 text-center text-gray-500">
-              No signals yet. Add tickers to your watchlist and click "Scan Now".
+              No signals yet. The next scan runs within 5 minutes, or click "Scan Now".
             </div>
           )}
         </div>

@@ -19,6 +19,7 @@ def start():
     from app.tasks.adaptive_optimize import run_adaptive_optimize
     from app.tasks.signal_outcome_seeder import run_signal_outcome_seeder
     from app.tasks.day_trade_flatten import run_day_trade_flatten
+    from app.services.adaptive.daily_learner import run_daily_learning
     from app.services.trading_engine.day_journal import reconcile as reconcile_day_trades
 
     scheduler.add_job(run_signal_scan, "interval", seconds=settings.signal_scan_interval, id="signal_scan", replace_existing=True)
@@ -34,6 +35,10 @@ def start():
                       timezone="America/New_York", id="day_trade_flatten_retry", replace_existing=True)
     # Close out the day-trade journal (exit price / P&L / reason) and enforce same-day profit-taking
     scheduler.add_job(reconcile_day_trades, "interval", seconds=60, id="day_trade_reconcile", replace_existing=True)
+    # Nightly self-improvement: re-weight algorithms by what actually predicted returns,
+    # and tune day-trade stop/target from the journal (after the close, once bars are final)
+    scheduler.add_job(run_daily_learning, "cron", day_of_week="mon-fri", hour=16, minute=30,
+                      timezone="America/New_York", id="daily_learning", replace_existing=True)
     # Bull/bear bias (SPY trend + VIX) — also computed once at startup
     scheduler.add_job(_refresh_bias, "interval", minutes=30, id="market_bias",
                       replace_existing=True, next_run_time=datetime.now(timezone.utc))

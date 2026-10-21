@@ -54,8 +54,11 @@ export default function Settings() {
       <div>
         <h1 className="text-xl font-semibold mb-3">Settings</h1>
         <ExplainBox>
-          Control how the bot behaves. <strong className="text-gray-300">Autopilot</strong> is the on/off switch for autonomous trading — turn it on and the bot will automatically buy and sell based on AI signals. It resets to OFF every time the backend restarts, so re-enable it after each restart.
-          <strong className="text-gray-300"> Watchlist</strong> defines which stocks the scanner analyzes every 5 minutes.
+          Control how the bot behaves. <strong className="text-gray-300">Autopilot</strong> is the on/off switch for autonomous trading — turn it on and the bot will automatically open and close day trades based on its signals.
+          {mode?.auto_start_autonomous
+            ? ' Autopilot is set to resume automatically after a restart (AUTO_START_AUTONOMOUS=true).'
+            : ' It resets to OFF every time the backend restarts, so re-enable it after each restart (or set AUTO_START_AUTONOMOUS=true in backend/.env).'}
+          <strong className="text-gray-300"> Watchlist</strong> lists the stocks always scanned; the bot also scans the best S&amp;P 500 / growth-stock picks each cycle.
           <strong className="text-gray-300"> Risk Parameters</strong> set position sizing and kill-switch thresholds.
           <strong className="text-gray-300"> Paper mode</strong> (default) uses fake money via Alpaca's paper trading sandbox — safe to experiment with.
         </ExplainBox>
@@ -65,8 +68,11 @@ export default function Settings() {
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
         <div className="text-sm font-medium mb-1">Auto Pilot</div>
         <p className="text-xs text-gray-500 mb-4">
-          When ON, the bot automatically places orders whenever a signal exceeds ±0.30. Scans run every 5 min during NYSE hours.
-          <span className="text-yellow-500 ml-1">⚠ Resets to OFF on every backend restart — re-enable after restarting.</span>
+          When ON, the bot places orders automatically whenever a signal clears the current (adaptive) BUY threshold. Scans run every 5 min and orders are only placed during NYSE hours.
+          {mode?.day_trade_only !== false && ' Day-trade-only mode is on: every position is closed by 15:50 ET.'}
+          {mode?.auto_start_autonomous
+            ? <span className="text-green-500 ml-1">Resumes automatically after a backend restart.</span>
+            : <span className="text-yellow-500 ml-1">⚠ Resets to OFF on every backend restart — re-enable after restarting.</span>}
         </p>
         <AutoTradeStatus />
       </div>
@@ -133,7 +139,7 @@ export default function Settings() {
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
         <div className="text-sm font-medium mb-1">Watchlist</div>
         <p className="text-xs text-gray-500 mb-4">
-          Tickers the AI scans every 5 minutes. Add any NYSE/NASDAQ stock. The scanner fetches live news + price data for each ticker every cycle.
+          Tickers always scanned every 5 minutes, in addition to the S&amp;P 500 / growth-stock picks the bot screens each cycle. Add any NYSE/NASDAQ stock. These are also the tickers streamed for live prices.
         </p>
         <div className="flex gap-2 mb-3">
           <input
@@ -180,7 +186,7 @@ export default function Settings() {
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
         <div className="text-sm font-medium mb-1">Risk Parameters</div>
         <p className="text-xs text-gray-500 mb-4">
-          Position size = (equity × risk_per_trade_pct) ÷ (2 × ATR). Max drawdown halt and daily loss halt are kill switches that pause all trading if breached.
+          Position size = (equity × risk_per_trade_pct × market-bias multiplier) ÷ stop distance, where the stop is an ATR multiple (day trades use a tight ~0.6 ATR stop). Max drawdown halt and daily loss halt are kill switches that pause all trading if breached.
         </p>
         <div className="grid grid-cols-2 gap-4">
           {risk && Object.entries(risk).map(([key, value]) => (

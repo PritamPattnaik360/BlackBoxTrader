@@ -274,7 +274,7 @@ pytest
 - **"Migration failed" on startup** — usually harmless if tables already exist; check `backend/blackbox.db` was created and re-run `python scripts/bootstrap.py` if unsure.
 - **No sentiment scores** — run `python scripts/download_finbert.py` and confirm `NEWSAPI_KEY`/`GNEWS_API_KEY` are set.
 - **Advisor chat says Ollama isn't running** — install/start Ollama and `ollama pull llama3.2:3b`.
-- **No live price updates** — this is expected without Redis; the in-memory cache still polls on the configured intervals. Set `USE_REDIS=true` with a running Redis instance for WebSocket streaming.
+- **No live price updates** — live prices come from Alpaca's free IEX feed as 1-minute bars for the watchlist tickers, so they only move during market hours (and only when a trade prints). Redis is optional; without it the backend serves the latest bar from its in-memory cache. Check the backend log for `Alpaca stream started`.
 
 ## Optional: running as a background service (PM2)
 
@@ -287,6 +287,16 @@ pm2 save
 ```
 
 See [Option C](#option-c--pm2-background-services-eg-for-always-on-paper-trading) above for the day-to-day PM2 commands.
+
+## Nightly self-learning
+
+Every weekday at 16:30 ET (`app/services/adaptive/daily_learner.py`) the bot reviews what actually happened and adjusts itself:
+
+- **Algorithm weights** — each stored signal records the score of every algorithm (intraday, momentum, mean-reversion, technical, trend lines, news). Per market bias (bull/neutral/bear) and mode (daily/intraday) it measures how well each score ranked the forward return and shifts weight toward what worked. Limits: needs 60+ samples over 3+ days, max ±15% change per weight per day, never beyond 0.5×–2× the hand-set default.
+- **Day-trade parameters** — stop distance, reward:risk and the minimum intraday score are tuned from the day-trade journal (needs 15+ closed trades over 3+ days, one 10% step per day, hard bounds).
+- Results are saved to `data/training/learned_state.json` (committed by the pre-push hook) and logged as `daily_learning` events.
+
+Controls: `GET /api/v1/adaptive/learned` (what it has learned), `POST /api/v1/adaptive/daily-learning?dry_run=true` (preview), `POST /api/v1/adaptive/learned/reset` (back to defaults), `LEARNING_ENABLED=false` (freeze).
 
 ## Training data in git
 

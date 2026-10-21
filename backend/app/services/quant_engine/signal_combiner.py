@@ -128,7 +128,8 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
     # The LLM trading signal only runs while the US market is open; outside the
     # session the daily factors are used alone (no point burning inference on
     # signals that can't be traded until the next open).
-    llm_online = market_open and await llm_alive()
+    from app.config import settings as _settings
+    llm_online = _settings.llm_signal_enabled and market_open and await llm_alive()
 
     def _blend(w: dict, llm: float) -> float:
         if market_open:
@@ -211,7 +212,8 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
         from app.config import settings
         if settings.day_trade_only:
             # Day-trade-only: every BUY with a live, positive intraday read is a same-day trade
-            if intraday_score > 0:
+            from app.services.adaptive.daily_learner import get_day_params
+            if intraday_score > max(0.0, get_day_params()["min_intraday_score"]):
                 trade_style = "day"
         elif (intraday_score >= DAY_TRADE_MIN_INTRADAY_SCORE
               and (breakout_confirmed or bias == "bear")):

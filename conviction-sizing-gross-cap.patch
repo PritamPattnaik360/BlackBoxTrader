@@ -1,0 +1,141 @@
+From 4ff4dcd43429e0c7186a207e1f0741ea9add5169 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 05:10:13 +0000
+Subject: [PATCH] Risk: conviction-scaled sizing and gross exposure cap (no
+ leverage)
+
+Paper history (2026-10-09, 18 day trades) showed every position clamped to the
+10% max-position cap regardless of signal strength, with no total-exposure cap:
+~184% gross on ~100k equity. Sub-0.30-score entries lost money (all 3 stops).
+Size by combined quant score tier (1.0/0.7/0.4) and cap gross long exposure at
+80% of equity. In-sample, 1 day, unproven - see report.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EmvTkw1LgAGui6g3SXsQmB
+---
+ backend/app/config.py                         |  1 +
+ .../services/risk_manager/portfolio_limits.py |  6 +++++
+ .../services/risk_manager/position_sizer.py   | 22 ++++++++++++++++
+ .../app/services/trading_engine/executor.py   |  9 +++++++
+ backend/tests/unit/test_conviction_sizing.py  | 26 +++++++++++++++++++
+ 5 files changed, 64 insertions(+)
+ create mode 100644 backend/tests/unit/test_conviction_sizing.py
+
+diff --git a/backend/app/config.py b/backend/app/config.py
+index b3e48e0..2738f26 100644
+--- a/backend/app/config.py
++++ b/backend/app/config.py
+@@ -50,6 +50,7 @@ class Settings(BaseSettings):
+     daily_loss_halt_pct: float = 0.05    # halt if day P&L < -5%
+     risk_per_trade_pct: float = 0.01     # 1% of equity risked per trade
+     max_open_positions: int = 20
++    max_gross_exposure_pct: float = 0.80  # total long notional / equity cap (no leverage)
+     default_stop_atr_multiplier: float = 2.0
+     options_target_dte: int = 30
+ 
+diff --git a/backend/app/services/risk_manager/portfolio_limits.py b/backend/app/services/risk_manager/portfolio_limits.py
+index 98cc881..cf358d0 100644
+--- a/backend/app/services/risk_manager/portfolio_limits.py
++++ b/backend/app/services/risk_manager/portfolio_limits.py
+@@ -46,3 +46,9 @@ def check_position_count(open_count: int) -> bool:
+ 
+ def check_position_size(notional: float, equity: float) -> bool:
+     return notional <= equity * settings.max_position_pct
++
++
++def check_gross_exposure(current_gross: float, new_notional: float, equity: float) -> bool:
++    """No-leverage guard: total open long notional (incl. the new order) must
++    stay within max_gross_exposure_pct of equity."""
++    return current_gross + new_notional <= equity * settings.max_gross_exposure_pct
+diff --git a/backend/app/services/risk_manager/position_sizer.py b/backend/app/services/risk_manager/position_sizer.py
+index f0c347e..3286e1a 100644
+--- a/backend/app/services/risk_manager/position_sizer.py
++++ b/backend/app/services/risk_manager/position_sizer.py
+@@ -35,3 +35,25 @@ def clamp_to_max(shares: int, current_price: float, equity: float) -> int:
+     if shares * current_price > max_val:
+         shares = int(max_val / current_price)
+     return max(shares, 1)
++
++
++# Conviction tiers (a-priori, not fitted): stronger combined quant scores earn
++# more of the risk budget; marginal scores are sized down rather than skipped.
++CONVICTION_TIERS = ((0.40, 1.0), (0.30, 0.7))
++CONVICTION_FLOOR = 0.4
++
++
++def conviction_multiplier(score: float | None) -> float:
++    """Size multiplier in (0, 1] from the combined quant score (long entries).
++    Unknown score -> 1.0 (no change in behaviour for callers that pass none)."""
++    if score is None:
++        return 1.0
++    for threshold, mult in CONVICTION_TIERS:
++        if score >= threshold:
++            return mult
++    return CONVICTION_FLOOR
++
++
++def scale_qty(qty: int, mult: float) -> int:
++    """Scale a share count by mult, keeping at least 1 share."""
++    return max(int(qty * mult), 1)
+diff --git a/backend/app/services/trading_engine/executor.py b/backend/app/services/trading_engine/executor.py
+index a45da5f..0384dd0 100644
+--- a/backend/app/services/trading_engine/executor.py
++++ b/backend/app/services/trading_engine/executor.py
+@@ -173,6 +173,8 @@ async def execute_signal(
+     else:
+         qty = position_sizer.fixed_fraction_size(equity, price, risk_pct=risk_pct)
+     qty = position_sizer.clamp_to_max(qty, price, equity)
++    # Conviction scaling: weaker combined scores get a smaller slice of capital.
++    qty = position_sizer.scale_qty(qty, position_sizer.conviction_multiplier(quant_score))
+ 
+     if qty <= 0:
+         result.update(action="skip", reason="Position sizer returned 0 shares")
+@@ -184,6 +186,13 @@ async def execute_signal(
+                       reason=f"Position ${notional:.0f} exceeds max {settings.max_position_pct:.0%} of equity")
+         return result
+ 
++    if side == "buy":
++        current_gross = sum(abs(p.get("market_value") or 0.0) for p in live_positions)
++        if not portfolio_limits.check_gross_exposure(current_gross, notional, equity):
++            result.update(action="skip",
++                          reason=f"Gross exposure cap ({settings.max_gross_exposure_pct:.0%} of equity) reached")
++            return result
++
+     if _dry_run:
+         logger.info(
+             f"[DRY RUN] Would {side.upper()} {qty}×{signal.ticker} "
+diff --git a/backend/tests/unit/test_conviction_sizing.py b/backend/tests/unit/test_conviction_sizing.py
+new file mode 100644
+index 0000000..649d522
+--- /dev/null
++++ b/backend/tests/unit/test_conviction_sizing.py
+@@ -0,0 +1,26 @@
++from app.services.risk_manager import position_sizer, portfolio_limits
++from app.config import settings
++
++
++def test_conviction_tiers_monotonic():
++    scores = [0.1, 0.25, 0.3, 0.35, 0.4, 0.6]
++    mults = [position_sizer.conviction_multiplier(s) for s in scores]
++    assert mults == sorted(mults)
++    assert mults[0] == position_sizer.CONVICTION_FLOOR and mults[-1] == 1.0
++
++
++def test_unknown_score_is_neutral():
++    assert position_sizer.conviction_multiplier(None) == 1.0
++
++
++def test_scale_qty_never_below_one_never_increases():
++    assert position_sizer.scale_qty(1, 0.4) == 1
++    assert position_sizer.scale_qty(100, 0.7) == 70
++
++
++def test_gross_exposure_cap_blocks_leverage():
++    eq = 100_000.0
++    cap = eq * settings.max_gross_exposure_pct
++    assert settings.max_gross_exposure_pct <= 1.0
++    assert portfolio_limits.check_gross_exposure(cap - 10_000, 10_000, eq)
++    assert not portfolio_limits.check_gross_exposure(cap - 10_000, 10_001, eq)
+-- 
+2.43.0
+
