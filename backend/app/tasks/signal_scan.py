@@ -185,7 +185,10 @@ async def run_signal_scan():
     # outcome data and can start adapting its thresholds.
     # Skipped in a bear market: forcing a long there just to generate data is
     # exactly the trade the bear profile is trying to avoid.
-    if (autonomous and market_open and trades_submitted == 0 and scan_results
+    # Off unless FORCE_LEARNING_TRADE=true — these sub-threshold trades lost money.
+    from app.config import settings
+    if (settings.force_learning_trade and autonomous and market_open
+            and trades_submitted == 0 and scan_results
             and market_bias.get_bias() != "bear"):
         from app.services.nlp_engine.aggregator import CompositeSignal
         from datetime import timezone

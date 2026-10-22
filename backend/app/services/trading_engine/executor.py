@@ -16,6 +16,8 @@ opens a put. There is still no short-selling — bearish exposure comes from
 owning a put, not shorting the underlying.
 """
 import logging
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
 from app.config import settings
 from app.services.nlp_engine.aggregator import CompositeSignal
 from app.services.risk_manager import position_sizer, portfolio_limits, stop_loss
@@ -40,6 +42,16 @@ def _pdt_allows_day_trade(equity: float) -> bool:
         return broker.get_account().get("day_trade_count", 0) < 3
     except Exception:
         return True   # can't check (e.g. no keys); the broker enforces it anyway
+
+
+def _day_entry_block_reason(quant_score: float | None, now_et: datetime) -> str | None:
+    """Hard gates on opening a day trade (score floor + entry cutoff). None = allowed."""
+    if quant_score is None or quant_score < settings.day_trade_min_score:
+        return f"Day-trade score {quant_score} below hard floor {settings.day_trade_min_score}"
+    cutoff = dtime.fromisoformat(settings.day_trade_entry_cutoff)
+    if now_et.time() > cutoff:
+        return f"Past day-trade entry cutoff ({settings.day_trade_entry_cutoff} ET)"
+    return None
 
 
 def _closes_position(direction: str, held: dict | None) -> bool:
@@ -155,6 +167,12 @@ async def execute_signal(
         reason = portfolio_limits.status()["reason"]
         result.update(action="skip", reason=f"Circuit breaker tripped ({reason}) — no new entries")
         return result
+
+    if is_day and held is None:
+        block = _day_entry_block_reason(quant_score, datetime.now(ZoneInfo("America/New_York")))
+        if block:
+            result.update(action="skip", reason=block)
+            return result
 
     if is_day and held is None and not _pdt_allows_day_trade(equity):
         result.update(action="skip", reason="Pattern-day-trader limit: 3 day trades used and equity < $25k")

@@ -68,6 +68,18 @@ class Settings(BaseSettings):
     # never held overnight. Set DAY_TRADE_ONLY=false to also allow multi-day swing positions.
     day_trade_only: bool = True
 
+    # Hard entry gates for day trades, applied in the executor so neither the bias
+    # profiles' threshold discounts nor the nightly learner can loosen them.
+    # Paper journal 2026-10-09..21: entries scoring < 0.30 lost $1,074 over 14 trades.
+    # Entries scoring >= 0.30 were profitable at every hour, so the cutoff defaults to the
+    # existing 15:30 window end; tighten it only if more data shows late entries losing.
+    day_trade_min_score: float = 0.30
+    day_trade_entry_cutoff: str = "15:30"   # ET, HH:MM; no new day-trade entries after this
+
+    # Force one small trade per scan when nothing qualifies, to seed learning outcomes.
+    # Off by default: those sub-threshold trades were the biggest P&L drain.
+    force_learning_trade: bool = False
+
     # Local LLM trading signal (Ollama). Paused by default: ~15s/ticker made scans overrun
     # their interval, and the quant algorithms carry the trading decision. When True it
     # still only runs during market hours. The advisor chat is unaffected.
