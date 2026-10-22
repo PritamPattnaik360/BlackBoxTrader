@@ -24,3 +24,22 @@ export const removeFromWatchlist = (ticker: string) =>
 
 export const setAutonomousMode = (enabled: boolean, confirm = false) =>
   api.post('/settings/autonomous', { enabled, confirm }).then((r) => r.data)
+
+export interface BreakerStatus {
+  halted: boolean
+  reason: 'daily_loss' | 'drawdown' | 'market_crash' | 'manual' | null
+  detail: string | null
+  tripped_at: string | null
+  peak_equity: number
+  day_start_equity: number
+  flatten_on_halt: boolean
+}
+
+export const getBreakerStatus = () =>
+  api.get<BreakerStatus>('/settings/risk/breaker').then((r) => r.data)
+
+export const killSwitch = () =>
+  api.post('/settings/risk/kill').then((r) => r.data)
+
+export const resumeTrading = () =>
+  api.post('/settings/risk/resume').then((r) => r.data)

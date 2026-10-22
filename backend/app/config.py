@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     max_position_pct: float = 0.10       # 10% of portfolio per position
     max_drawdown_halt_pct: float = 0.15  # halt if 15% below peak
     daily_loss_halt_pct: float = 0.05    # halt if day P&L < -5%
+    market_crash_halt_pct: float = 0.03  # halt if SPY is down 3%+ on the day
+    flatten_on_halt: bool = True         # liquidate all positions when the breaker trips
+    position_max_loss_pct: float = 0.15  # hard stop: close any stock position down 15%
+    option_max_loss_pct: float = 0.50    # hard stop: close any option position down 50%
+    risk_guard_interval: int = 30        # seconds between circuit-breaker checks
     risk_per_trade_pct: float = 0.01     # 1% of equity risked per trade
     max_open_positions: int = 20
     default_stop_atr_multiplier: float = 2.0

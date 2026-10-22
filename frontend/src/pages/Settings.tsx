@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Plus, Trash2, AlertTriangle, Info } from 'lucide-react'
 import AdaptivePanel from '../components/adaptive/AdaptivePanel'
 import AutoTradeStatus from '../components/autonomous/AutoTradeStatus'
+import CircuitBreakerPanel from '../components/autonomous/CircuitBreakerPanel'
 import LlmStatusPanel from '../components/advisor/LlmStatusPanel'
 
 function ExplainBox({ children }: { children: React.ReactNode }) {
@@ -182,11 +183,13 @@ export default function Settings() {
         <AdaptivePanel />
       </div>
 
+      <CircuitBreakerPanel />
+
       {/* Risk settings */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
         <div className="text-sm font-medium mb-1">Risk Parameters</div>
         <p className="text-xs text-gray-500 mb-4">
-          Position size = (equity × risk_per_trade_pct × market-bias multiplier) ÷ stop distance, where the stop is an ATR multiple (day trades use a tight ~0.6 ATR stop). Max drawdown halt and daily loss halt are kill switches that pause all trading if breached.
+          Position size = (equity × risk_per_trade_pct × market-bias multiplier) ÷ stop distance, where the stop is an ATR multiple (day trades use a tight ~0.6 ATR stop). The halt percentages and max-loss percentages below drive the Circuit Breaker above (0.05 = 5%).
         </p>
         <div className="grid grid-cols-2 gap-4">
           {risk && Object.entries(risk).map(([key, value]) => (

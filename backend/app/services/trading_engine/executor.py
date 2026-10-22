@@ -42,6 +42,15 @@ def _pdt_allows_day_trade(equity: float) -> bool:
         return True   # can't check (e.g. no keys); the broker enforces it anyway
 
 
+def _closes_position(direction: str, held: dict | None) -> bool:
+    """True when this signal would reduce exposure (sell shares / close an opposite option)."""
+    if held is None:
+        return False
+    if held.get("option_type") is None:
+        return direction == "SELL"
+    return held["option_type"] != ("call" if direction == "BUY" else "put")
+
+
 # ── Mode controls ─────────────────────────────────────────────────────────────
 
 def enable_autonomous() -> None:
@@ -115,9 +124,7 @@ async def execute_signal(
         return result
 
     # ── Risk gate ─────────────────────────────────────────────────────────────
-    if portfolio_limits.is_halted(equity):
-        result.update(action="skip", reason="Portfolio halted (daily loss or max drawdown)")
-        return result
+    halted = portfolio_limits.is_halted(equity)
 
     if not portfolio_limits.check_position_count(open_position_count):
         result.update(action="skip", reason=f"Max open positions ({settings.max_open_positions}) reached")
@@ -142,6 +149,12 @@ async def execute_signal(
         logger.warning(f"Could not fetch positions for guard check: {e} — proceeding")
         live_positions = []
     held = next((p for p in live_positions if p["ticker"] == signal.ticker), None)
+
+    # A tripped circuit breaker blocks new entries but must never block an exit
+    if halted and not _closes_position(signal.direction, held):
+        reason = portfolio_limits.status()["reason"]
+        result.update(action="skip", reason=f"Circuit breaker tripped ({reason}) — no new entries")
+        return result
 
     if is_day and held is None and not _pdt_allows_day_trade(equity):
         result.update(action="skip", reason="Pattern-day-trader limit: 3 day trades used and equity < $25k")

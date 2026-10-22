@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 from app.config import settings
+from app.services.risk_manager import portfolio_limits
 from app.services.trading_engine import broker as broker_module
 from app.services.trading_engine.executor import (
     enable_live_execution, disable_live_execution,
@@ -105,6 +106,9 @@ async def get_risk_settings():
         "max_position_pct": settings.max_position_pct,
         "max_drawdown_halt_pct": settings.max_drawdown_halt_pct,
         "daily_loss_halt_pct": settings.daily_loss_halt_pct,
+        "market_crash_halt_pct": settings.market_crash_halt_pct,
+        "position_max_loss_pct": settings.position_max_loss_pct,
+        "option_max_loss_pct": settings.option_max_loss_pct,
         "max_open_positions": settings.max_open_positions,
         "buy_signal_threshold": settings.buy_signal_threshold,
         "sell_signal_threshold": settings.sell_signal_threshold,
@@ -114,18 +118,44 @@ async def get_risk_settings():
 class RiskUpdate(BaseModel):
     risk_per_trade_pct: float | None = None
     max_position_pct: float | None = None
+    max_drawdown_halt_pct: float | None = Field(None, gt=0, lt=1)
+    daily_loss_halt_pct: float | None = Field(None, gt=0, lt=1)
+    market_crash_halt_pct: float | None = Field(None, gt=0, lt=1)
+    position_max_loss_pct: float | None = Field(None, gt=0, le=1)
+    option_max_loss_pct: float | None = Field(None, gt=0, le=1)
     buy_signal_threshold: float | None = None
     sell_signal_threshold: float | None = None
 
 
 @router.post("/risk")
 async def update_risk_settings(req: RiskUpdate):
-    if req.risk_per_trade_pct is not None:
-        settings.risk_per_trade_pct = req.risk_per_trade_pct
-    if req.max_position_pct is not None:
-        settings.max_position_pct = req.max_position_pct
-    if req.buy_signal_threshold is not None:
-        settings.buy_signal_threshold = req.buy_signal_threshold
-    if req.sell_signal_threshold is not None:
-        settings.sell_signal_threshold = req.sell_signal_threshold
+    for key, value in req.model_dump(exclude_none=True).items():
+        setattr(settings, key, value)
     return {"updated": True}
+
+
+# ── Circuit breaker ───────────────────────────────────────────────────────────
+
+def _current_equity() -> float | None:
+    try:
+        return broker_module.get_account()["equity"]
+    except Exception:
+        return None
+
+
+@router.get("/risk/breaker")
+async def get_breaker_status():
+    return {**portfolio_limits.status(), "flatten_on_halt": settings.flatten_on_halt}
+
+
+@router.post("/risk/kill")
+async def kill_switch():
+    """Halt all new entries now. The risk guard liquidates open positions on its next tick."""
+    portfolio_limits.kill()
+    return portfolio_limits.status()
+
+
+@router.post("/risk/resume")
+async def resume_trading():
+    portfolio_limits.resume(_current_equity())
+    return portfolio_limits.status()

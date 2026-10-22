@@ -30,6 +30,7 @@ def get_account() -> dict:
     acct = client.get_account()
     return {
         "equity": float(acct.equity),
+        "last_equity": float(acct.last_equity) if acct.last_equity else None,   # prior close
         "cash": float(acct.cash),
         "buying_power": float(acct.buying_power),
         "portfolio_value": float(acct.portfolio_value),
@@ -149,6 +150,16 @@ def flatten_symbol(symbol: str) -> None:
         except Exception as e:
             logger.warning(f"Could not cancel order {o.id} on {symbol}: {e}")
     client.close_position(symbol)
+
+
+def flatten_all() -> None:
+    """Emergency liquidation: cancel every open order, then close every position."""
+    client = get_trading_client()
+    client.close_all_positions(cancel_orders=True)
+
+
+def is_market_open() -> bool:
+    return bool(get_trading_client().get_clock().is_open)
 
 
 def cancel_order(order_id: str) -> None:

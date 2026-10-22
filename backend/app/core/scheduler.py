@@ -16,6 +16,7 @@ async def _refresh_bias():
 def start():
     from app.tasks.signal_scan import run_signal_scan
     from app.tasks.portfolio_sync import run_portfolio_sync
+    from app.tasks.risk_guard import run_risk_guard
     from app.tasks.adaptive_optimize import run_adaptive_optimize
     from app.tasks.signal_outcome_seeder import run_signal_outcome_seeder
     from app.tasks.day_trade_flatten import run_day_trade_flatten
@@ -24,6 +25,9 @@ def start():
 
     scheduler.add_job(run_signal_scan, "interval", seconds=settings.signal_scan_interval, id="signal_scan", replace_existing=True)
     scheduler.add_job(run_portfolio_sync, "interval", seconds=settings.portfolio_sync_interval, id="portfolio_sync", replace_existing=True)
+    # Circuit breaker + hard per-position stops (liquidates on a major loss)
+    scheduler.add_job(run_risk_guard, "interval", seconds=settings.risk_guard_interval, id="risk_guard",
+                      replace_existing=True, max_instances=1, coalesce=True)
     # Run a full optimization pass every 2 hours regardless of trade count
     scheduler.add_job(run_adaptive_optimize, "interval", hours=2, id="adaptive_optimize", replace_existing=True)
     # Convert past signals into LLM training samples every 30 minutes

@@ -48,3 +48,6 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Circuit-breaker runtime state
+data/risk_state.json

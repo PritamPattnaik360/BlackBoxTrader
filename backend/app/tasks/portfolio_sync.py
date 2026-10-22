@@ -13,7 +13,7 @@ async def run_portfolio_sync():
         from app.services.trading_engine.broker import get_account, get_positions
         account  = get_account()
         positions = get_positions()
-        portfolio_limits.update_equity(account["equity"])
+        portfolio_limits.update_equity(account["equity"], account.get("last_equity"))
     except Exception as e:
         logger.debug(f"Portfolio sync skipped (broker unavailable): {e}")
         return
