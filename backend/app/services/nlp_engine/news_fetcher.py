@@ -15,7 +15,50 @@ async def fetch_news(ticker: str) -> list[dict]:
         articles += await _fetch_gnews(ticker)
     if not articles:
         articles += await _fetch_yfinance_news(ticker)
+    if not articles:
+        articles += await _fetch_rss(ticker)
     return articles
+
+
+_RSS_URLS = (
+    ("yahoo-finance", "https://feeds.finance.yahoo.com/rss/2.0/headline?s={t}&region=US&lang=en-US"),
+    ("google-news", "https://news.google.com/rss/search?q={t}+stock+when:1d&hl=en-US&gl=US&ceid=US:en"),
+)
+
+
+async def _fetch_rss(ticker: str) -> list[dict]:
+    """Keyless fallback: Yahoo Finance then Google News RSS headlines (last ~24h)."""
+    from email.utils import parsedate_to_datetime
+    from xml.etree import ElementTree
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    for source, tmpl in _RSS_URLS:
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True,
+                                         headers={"User-Agent": "Mozilla/5.0"}) as client:
+                r = await client.get(tmpl.format(t=ticker))
+                r.raise_for_status()
+            results = []
+            for item in ElementTree.fromstring(r.content).iter("item"):
+                title = (item.findtext("title") or "").strip()
+                if not title:
+                    continue
+                try:
+                    ts = parsedate_to_datetime(item.findtext("pubDate") or "")
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except Exception:
+                    ts = None
+                if ts and ts < cutoff:
+                    continue
+                results.append({"title": title, "source": source,
+                                "published_at": ts.timestamp() if ts else "", "ticker": ticker})
+                if len(results) >= 20:
+                    break
+            if results:
+                return results
+        except Exception as e:
+            logger.debug(f"{source} RSS error for {ticker}: {e}")
+    return []
 
 
 async def _fetch_yfinance_news(ticker: str) -> list[dict]:

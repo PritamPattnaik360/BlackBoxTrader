@@ -35,6 +35,7 @@ def get_account() -> dict:
         "buying_power": float(acct.buying_power),
         "portfolio_value": float(acct.portfolio_value),
         "day_trade_count": acct.daytrade_count,
+        "shorting_enabled": bool(getattr(acct, "shorting_enabled", False)),
         "trading_blocked": acct.trading_blocked,
         "account_blocked": acct.account_blocked,
     }
@@ -117,11 +118,13 @@ def submit_stop_order(ticker: str, side: str, qty: float, stop_price: float) -> 
     return _order_to_dict(order)
 
 
-def submit_bracket_order(ticker: str, qty: int, stop_price: float, take_profit_price: float) -> dict:
+def submit_bracket_order(ticker: str, qty: int, stop_price: float, take_profit_price: float,
+                         side: str = "buy") -> dict:
     """
-    Market BUY with an attached stop-loss and take-profit (OCO). Day-trade entry:
+    Market entry with an attached stop-loss and take-profit (OCO). Day-trade entry:
     DAY time-in-force so the exit legs lapse at the close. Alpaca requires whole
-    shares for bracket orders.
+    shares for bracket orders. side="buy" opens a long (stop below, target above);
+    side="sell" opens a SHORT (stop above, target below).
     """
     from alpaca.trading.requests import MarketOrderRequest, StopLossRequest, TakeProfitRequest
     from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
@@ -129,7 +132,7 @@ def submit_bracket_order(ticker: str, qty: int, stop_price: float, take_profit_p
     req = MarketOrderRequest(
         symbol=ticker,
         qty=int(qty),
-        side=OrderSide.BUY,
+        side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
         time_in_force=TimeInForce.DAY,
         order_class=OrderClass.BRACKET,
         stop_loss=StopLossRequest(stop_price=round(stop_price, 2)),
@@ -182,13 +185,27 @@ def _order_to_dict(order) -> dict:
     }
 
 
+def get_asset_flags(symbol: str) -> dict:
+    """Tradability flags needed before shorting: tradable / shortable / easy_to_borrow."""
+    a = get_trading_client().get_asset(symbol)
+    return {"tradable": bool(a.tradable), "shortable": bool(a.shortable),
+            "easy_to_borrow": bool(a.easy_to_borrow)}
+
+
 def get_last_sell_fill(symbol: str, since) -> dict | None:
     """Most recent filled SELL on `symbol` after `since` (datetime) - bracket legs included."""
+    return get_last_fill(symbol, since, "sell")
+
+
+def get_last_fill(symbol: str, since, side: str = "sell") -> dict | None:
+    """Most recent filled order on `symbol` after `since` for the given side. A long day trade
+    exits with a SELL; a short day trade exits (covers) with a BUY. Bracket legs included."""
     from alpaca.trading.requests import GetOrdersRequest
     from alpaca.trading.enums import QueryOrderStatus, OrderSide
     client = get_trading_client()
     orders = client.get_orders(GetOrdersRequest(
-        status=QueryOrderStatus.CLOSED, symbols=[symbol], side=OrderSide.SELL, after=since, limit=50,
+        status=QueryOrderStatus.CLOSED, symbols=[symbol],
+        side=OrderSide.SELL if side == "sell" else OrderSide.BUY, after=since, limit=50,
     ))
     fills = [o for o in orders if o.filled_avg_price and o.filled_at]
     if not fills:

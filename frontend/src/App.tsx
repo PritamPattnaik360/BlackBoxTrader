@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Portfolio from './pages/Portfolio'
 import Orders from './pages/Orders'
 import Signals from './pages/Signals'
+import DayTrading from './pages/DayTrading'
 import Backtest from './pages/Backtest'
 import Settings from './pages/Settings'
 
@@ -21,6 +22,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/orders" element={<Orders />} />
+            <Route path="/day-trading" element={<DayTrading />} />
             <Route path="/signals" element={<Signals />} />
             <Route path="/backtest" element={<Backtest />} />
             <Route path="/settings" element={<Settings />} />

@@ -43,7 +43,7 @@ async def _close(pos: dict, why: str) -> None:
         await asyncio.to_thread(broker.flatten_symbol, symbol)
         logger.warning(f"[RISK] Closed {symbol} (qty {pos['qty']}): {why}")
         await executor._save_order(
-            ticker=pos["ticker"], side="sell", qty=abs(pos["qty"]),
+            ticker=pos["ticker"], side="buy" if pos["qty"] < 0 else "sell", qty=abs(pos["qty"]),
             price=pos.get("current_price") or 0.0, stop_price=None, signal_id=None,
             source="risk_stop", quant_score=None,
             asset_class="us_option" if pos.get("contract_symbol") else "us_equity",

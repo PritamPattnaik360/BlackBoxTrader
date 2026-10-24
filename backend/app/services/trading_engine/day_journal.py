@@ -29,16 +29,16 @@ ET = ZoneInfo("America/New_York")
 
 async def open_trade(ticker: str, qty: float, entry_price: float, stop_price: float | None,
                      target_price: float | None, bias: str | None, quant_score: float | None,
-                     contract_symbol: str | None = None) -> None:
+                     contract_symbol: str | None = None, side: str = "long") -> None:
     try:
         async with AsyncSessionLocal() as db:
             db.add(DayTrade(
-                ticker=ticker, contract_symbol=contract_symbol, status="open", qty=qty,
+                ticker=ticker, contract_symbol=contract_symbol, status="open", qty=qty, side=side,
                 entry_price=entry_price, stop_price=stop_price, target_price=target_price,
                 bias=bias, quant_score=quant_score,
             ))
             await db.commit()
-        logger.info(f"[DAYTRADE] Logged OPEN {ticker} x{qty} @ {entry_price:.2f} "
+        logger.info(f"[DAYTRADE] Logged OPEN {side.upper()} {ticker} x{qty} @ {entry_price:.2f} "
                     f"stop={stop_price} target={target_price}")
     except Exception as e:
         logger.warning(f"Could not journal day trade for {ticker}: {e}")
@@ -51,11 +51,12 @@ def _aware(dt: datetime) -> datetime:
 def _close(row: DayTrade, price: float, reason: str, when: datetime | None = None) -> None:
     when = when or datetime.now(timezone.utc)
     mult = 100 if row.contract_symbol else 1
+    sign = -1 if (getattr(row, "side", None) or "long") == "short" else 1   # a short profits when price falls
     row.exit_price = price
     row.exit_time = when
     row.exit_reason = reason
-    row.pnl = round((price - row.entry_price) * row.qty * mult, 2)
-    row.pnl_pct = round(price / row.entry_price - 1, 4) if row.entry_price else None
+    row.pnl = round(sign * (price - row.entry_price) * row.qty * mult, 2)
+    row.pnl_pct = round(sign * (price / row.entry_price - 1), 4) if row.entry_price else None
     row.held_minutes = int((_aware(when) - _aware(row.entry_time)).total_seconds() // 60)
     row.status = "closed"
     logger.info(f"[DAYTRADE] Logged CLOSE {row.ticker} @ {price:.2f} pnl={row.pnl:+.2f} "
@@ -87,7 +88,12 @@ async def reconcile() -> None:
                 # Still open: enforce same-day profit-taking / stop on the fallback path
                 px = pos.get("current_price") or 0.0
                 reason = None
-                if row.target_price and px >= row.target_price:
+                if (getattr(row, "side", None) or "long") == "short":
+                    if row.target_price and px and px <= row.target_price:
+                        reason = "take_profit"
+                    elif row.stop_price and px >= row.stop_price:
+                        reason = "stop"
+                elif row.target_price and px >= row.target_price:
                     reason = "take_profit"
                 elif row.stop_price and px and px <= row.stop_price:
                     reason = "stop"
@@ -101,7 +107,9 @@ async def reconcile() -> None:
 
             # No longer held → find how it exited
             try:
-                fill = await asyncio.to_thread(broker.get_last_sell_fill, symbol, _aware(row.entry_time))
+                # A long exits with a SELL; a short exits (covers) with a BUY
+                exit_side = "buy" if (getattr(row, "side", None) or "long") == "short" else "sell"
+                fill = await asyncio.to_thread(broker.get_last_fill, symbol, _aware(row.entry_time), exit_side)
             except Exception:
                 fill = None
             if fill:

@@ -288,6 +288,18 @@ pm2 save
 
 See [Option C](#option-c--pm2-background-services-eg-for-always-on-paper-trading) above for the day-to-day PM2 commands.
 
+## Editing trading settings in the UI
+
+**Settings → Trading settings** edits the day-trade entry rules (min score, min VWAP, last-entry time, day-trade-only, shorting), exit targets (stop distance, reward:risk), risk limits and circuit-breaker thresholds, and automation switches (auto-start, LLM signal, nightly learning). Values are validated against safe bounds, applied to the running bot immediately, and saved to `data/runtime_settings.json` (git-ignored), so they survive restarts and **override `backend/.env`**. Each row shows its default and a reset button; turning on shorting in live mode needs a typed confirmation. The **Day Trading** page shows the results visually: recent-results strip, session timeline, P&L per trade with a running total, a result distribution, and stop-to-target range bars.
+
+## Short day trades (bear markets)
+
+When the market bias is **bear**, the day-trade engine can **short** instead of only buying: a strong intraday breakdown (SELL signal, price well below VWAP, score at or below -`DAY_TRADE_MIN_SCORE`) opens a short with a bracket order — **stop above, take-profit below** — and it is covered by the 15:50 ET forced exit like every day trade. A BUY signal on a short position covers it. Shorts are journaled (with a SHORT tag) and their P&L is computed with the sign flipped.
+
+Safety rails: `ENABLE_SHORT_DAY_TRADES` (default on), shorting real money is blocked unless `ALLOW_SHORT_LIVE=true`, the stock must be shortable and easy to borrow on Alpaca, the account must have shorting enabled, the PDT guard applies, and entries stop at `DAY_TRADE_ENTRY_CUTOFF`. Shorting is skipped when `ENABLE_OPTIONS_TRADING` is on (bearish views use puts there). Losses on a short are not capped by the price, only by the stop order, so start on paper. Bear-market shorting has **not** been backtested (recent data is bullish).
+
+Exits (SELL on a long, BUY on a short) always close the **whole** position: open stop/bracket orders on the symbol are cancelled first, then it is liquidated at market. Only one scan runs at a time ("Scan Now" can't overlap the scheduled scan).
+
 ## Nightly self-learning
 
 Every weekday at 16:30 ET (`app/services/adaptive/daily_learner.py`) the bot reviews what actually happened and adjusts itself:

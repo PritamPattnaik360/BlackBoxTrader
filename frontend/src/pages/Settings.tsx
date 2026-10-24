@@ -1,11 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getTradingMode, setTradingMode, getRiskSettings, updateRiskSettings, getWatchlist, addToWatchlist, removeFromWatchlist } from '../api/settings'
+import { getTradingMode, setTradingMode, getWatchlist, addToWatchlist, removeFromWatchlist } from '../api/settings'
 import { useState } from 'react'
 import { Plus, Trash2, AlertTriangle, Info } from 'lucide-react'
 import AdaptivePanel from '../components/adaptive/AdaptivePanel'
 import AutoTradeStatus from '../components/autonomous/AutoTradeStatus'
 import CircuitBreakerPanel from '../components/autonomous/CircuitBreakerPanel'
 import LlmStatusPanel from '../components/advisor/LlmStatusPanel'
+import TradingConfigPanel from '../components/strategy/TradingConfigPanel'
 
 function ExplainBox({ children }: { children: React.ReactNode }) {
   return (
@@ -19,23 +20,16 @@ function ExplainBox({ children }: { children: React.ReactNode }) {
 export default function Settings() {
   const qc = useQueryClient()
   const { data: mode } = useQuery({ queryKey: ['tradingMode'], queryFn: getTradingMode })
-  const { data: risk } = useQuery({ queryKey: ['riskSettings'], queryFn: getRiskSettings })
   const { data: watchlist } = useQuery({ queryKey: ['watchlist'], queryFn: getWatchlist })
 
   const [confirmModal, setConfirmModal] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [newTicker, setNewTicker] = useState('')
-  const [riskForm, setRiskForm] = useState<Record<string, string>>({})
 
   const switchMode = useMutation({
     mutationFn: ({ m, confirm, exec }: { m: 'paper' | 'live'; confirm: boolean; exec: boolean }) =>
       setTradingMode(m, confirm, exec),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tradingMode'] }); setConfirmModal(false); setConfirmText('') },
-  })
-
-  const updateRisk = useMutation({
-    mutationFn: updateRiskSettings,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['riskSettings'] }),
   })
 
   const addTicker = useMutation({
@@ -76,6 +70,11 @@ export default function Settings() {
             : <span className="text-yellow-500 ml-1">⚠ Resets to OFF on every backend restart — re-enable after restarting.</span>}
         </p>
         <AutoTradeStatus />
+      </div>
+
+      {/* Day-trading / risk / automation settings (editable, persisted) */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+        <TradingConfigPanel />
       </div>
 
       {/* Trading Mode */}
@@ -184,34 +183,6 @@ export default function Settings() {
       </div>
 
       <CircuitBreakerPanel />
-
-      {/* Risk settings */}
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
-        <div className="text-sm font-medium mb-1">Risk Parameters</div>
-        <p className="text-xs text-gray-500 mb-4">
-          Position size = (equity × risk_per_trade_pct × market-bias multiplier) ÷ stop distance, where the stop is an ATR multiple (day trades use a tight ~0.6 ATR stop). The halt percentages and max-loss percentages below drive the Circuit Breaker above (0.05 = 5%).
-        </p>
-        <div className="grid grid-cols-2 gap-4">
-          {risk && Object.entries(risk).map(([key, value]) => (
-            <div key={key}>
-              <label className="text-xs text-gray-500 block mb-1">{key.replace(/_/g, ' ')}</label>
-              <input
-                type="number" step="0.001"
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                defaultValue={String(value)}
-                onChange={(e) => setRiskForm(f => ({ ...f, [key]: e.target.value }))}
-              />
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={() => updateRisk.mutate(Object.fromEntries(Object.entries(riskForm).map(([k, v]) => [k, parseFloat(v)])))}
-          className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm"
-          disabled={Object.keys(riskForm).length === 0}
-        >
-          Save Risk Settings
-        </button>
-      </div>
     </div>
   )
 }

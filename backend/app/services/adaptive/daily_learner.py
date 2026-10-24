@@ -108,6 +108,18 @@ def reset() -> None:
     _cached["state"] = None
 
 
+def set_day_param(key: str, value: float) -> None:
+    """Manually set one day-trade parameter (from the Settings page). The nightly learner
+    keeps tuning from this new baseline, always inside DAY_BOUNDS."""
+    if key not in DAY_BOUNDS:
+        raise ValueError(f"unknown day-trade parameter '{key}'")
+    lo, hi = DAY_BOUNDS[key]
+    state = load_state()
+    state["day"][key] = round(float(np.clip(value, lo, hi)), 3)
+    save_state(state)
+    _cached["state"] = None
+
+
 # ── Pure learning maths (unit-tested) ─────────────────────────────────────────
 
 def rank_ic(x: pd.Series, y: pd.Series) -> float | None:
@@ -122,19 +134,29 @@ def rank_ic(x: pd.Series, y: pd.Series) -> float | None:
 def update_weights(current: dict, default: dict, ics: dict) -> dict:
     """
     Move `current` weights one bounded step toward the components with positive IC.
-    Components with no usable IC keep their weight. Result is bounded relative to
-    `default` and renormalised to sum to 1.
+    Components with no usable IC (e.g. a news feed that is always 0) are held fixed —
+    never above their default — and only the live components are renormalised to fill
+    the remaining weight, so a dead component can't absorb weight from working ones.
+    Result is bounded relative to `default` and sums to 1.
     """
-    new = {}
+    fixed, live = {}, {}
     for c, w in current.items():
         ic = ics.get(c)
-        if ic is not None:
-            step = LEARNING_RATE * float(np.clip(ic / IC_FULL, -1.0, 1.0))
-            w = w * (1.0 + step)
+        if ic is None:
+            fixed[c] = min(w, default[c])
+            continue
+        step = LEARNING_RATE * float(np.clip(ic / IC_FULL, -1.0, 1.0))
         lo, hi = default[c] * MAX_DRIFT[0], default[c] * MAX_DRIFT[1]
-        new[c] = float(np.clip(w, lo, hi))
-    total = sum(new.values())
-    return {c: round(v / total, 4) for c, v in new.items()}
+        live[c] = float(np.clip(w * (1.0 + step), lo, hi))
+    room = max(0.0, 1.0 - sum(fixed.values()))
+    total = sum(live.values())
+    new = dict(fixed)
+    if live:
+        new.update({c: v / total * room for c, v in live.items()})
+    else:
+        new = dict(current)
+    s = sum(new.values())
+    return {c: round(new[c] / s, 4) for c in current}
 
 
 def tune_day_params(params: dict, trades: list[dict]) -> tuple[dict, list[str]]:

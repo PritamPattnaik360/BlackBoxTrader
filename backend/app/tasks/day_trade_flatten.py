@@ -32,7 +32,6 @@ async def run_day_trade_flatten():
         rows = (await db.execute(
             select(TradeOrder).where(
                 TradeOrder.source == "daytrade",
-                TradeOrder.side == "buy",
                 TradeOrder.submitted_at >= cutoff,
             )
         )).scalars().all()
@@ -54,7 +53,7 @@ async def run_day_trade_flatten():
             await asyncio.to_thread(broker.flatten_symbol, symbol)
             logger.info(f"[DAYTRADE] EOD flatten: closed {symbol} (qty {pos['qty']})")
             await executor._save_order(
-                ticker=pos["ticker"], side="sell", qty=abs(pos["qty"]),
+                ticker=pos["ticker"], side="buy" if pos["qty"] < 0 else "sell", qty=abs(pos["qty"]),
                 price=pos.get("current_price") or 0.0, stop_price=None, signal_id=None,
                 source="daytrade", quant_score=None,
                 asset_class="us_option" if pos.get("contract_symbol") else "us_equity",

@@ -12,6 +12,7 @@ class DayTrade(Base):
     ticker: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     contract_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(10), default="open", index=True)   # open | closed
+    side: Mapped[str] = mapped_column(String(5), default="long")                  # long | short
     qty: Mapped[float] = mapped_column(Float, nullable=False)
     entry_price: Mapped[float] = mapped_column(Float, nullable=False)
     stop_price: Mapped[float | None] = mapped_column(Float, nullable=True)

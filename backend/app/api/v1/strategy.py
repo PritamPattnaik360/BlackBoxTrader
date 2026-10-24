@@ -59,13 +59,18 @@ async def refresh_strategy():
     return _payload()
 
 
+def _utc(dt):
+    """Stored timestamps are naive UTC; make the offset explicit for the browser."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def _row(t: DayTrade) -> dict:
     return {
         "id": t.id, "ticker": t.ticker, "status": t.status, "qty": t.qty,
         "entry_price": t.entry_price, "stop_price": t.stop_price, "target_price": t.target_price,
-        "entry_time": t.entry_time.isoformat() if t.entry_time else None,
+        "entry_time": _utc(t.entry_time).isoformat() if t.entry_time else None,
         "exit_price": t.exit_price,
-        "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+        "exit_time": _utc(t.exit_time).isoformat() if t.exit_time else None,
         "pnl": t.pnl, "pnl_pct": t.pnl_pct, "exit_reason": t.exit_reason,
         "held_minutes": t.held_minutes, "bias": t.bias,
     }

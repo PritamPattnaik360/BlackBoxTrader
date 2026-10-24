@@ -51,3 +51,6 @@ logs/
 
 # Circuit-breaker runtime state
 data/risk_state.json
+# Trading settings saved from the Settings page
+data/runtime_settings.json
+data/trading_profiles.json

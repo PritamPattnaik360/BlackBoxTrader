@@ -12,9 +12,18 @@ Enabling autonomous mode automatically disables dry_run (enables paper execution
 
 When settings.enable_options_trading is on, signals trade long options
 instead of shares (see _execute_options_signal): BUY opens a call, SELL
-opens a put. There is still no short-selling — bearish exposure comes from
-owning a put, not shorting the underlying.
+opens a put (options mode never shorts shares).
+
+Short day trades (settings.enable_short_day_trades): with options trading off and the
+market bias "bear", a strong intraday breakdown (style="short", direction SELL, no
+position held) opens a SHORT with a bracket order — stop above, take-profit below —
+that is covered by 15:50 ET. A BUY signal on a short position covers it.
+
+Exits (SELL on a long / BUY on a short) always close the WHOLE position: open stop and
+bracket orders on the symbol are cancelled first, then it is liquidated at market. No
+protective stop is attached to an exit.
 """
+import asyncio
 import logging
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
@@ -44,21 +53,62 @@ def _pdt_allows_day_trade(equity: float) -> bool:
         return True   # can't check (e.g. no keys); the broker enforces it anyway
 
 
-def _day_entry_block_reason(quant_score: float | None, now_et: datetime) -> str | None:
-    """Hard gates on opening a day trade (score floor + entry cutoff). None = allowed."""
+def _day_entry_block_reason(quant_score: float | None, now_et: datetime,
+                            vwap_score: float | None = None) -> str | None:
+    """Hard gates on opening a day trade (score floor + VWAP confirmation + entry cutoff). None = allowed."""
     if quant_score is None or quant_score < settings.day_trade_min_score:
         return f"Day-trade score {quant_score} below hard floor {settings.day_trade_min_score}"
+    if vwap_score is None or vwap_score < settings.day_trade_min_vwap:
+        return f"VWAP score {vwap_score} below {settings.day_trade_min_vwap} — price not far enough above VWAP"
     cutoff = dtime.fromisoformat(settings.day_trade_entry_cutoff)
     if now_et.time() > cutoff:
         return f"Past day-trade entry cutoff ({settings.day_trade_entry_cutoff} ET)"
     return None
 
 
+def _short_entry_block_reason(quant_score: float | None, now_et: datetime,
+                              vwap_score: float | None = None) -> str | None:
+    """Mirror of _day_entry_block_reason for SHORT day trades: a strong NEGATIVE score and price
+    well BELOW session VWAP, before the entry cutoff. None = allowed."""
+    if not settings.enable_short_day_trades:
+        return "Short day trades are disabled (ENABLE_SHORT_DAY_TRADES=false)"
+    if settings.trading_mode == "live" and not settings.allow_short_live:
+        return "Short selling in LIVE mode needs ALLOW_SHORT_LIVE=true"
+    if quant_score is None or quant_score > -settings.day_trade_min_score:
+        return f"Short score {quant_score} not below -{settings.day_trade_min_score}"
+    if vwap_score is None or vwap_score > -settings.day_trade_min_vwap:
+        return f"VWAP score {vwap_score} not below -{settings.day_trade_min_vwap} — price not far enough below VWAP"
+    cutoff = dtime.fromisoformat(settings.day_trade_entry_cutoff)
+    if now_et.time() > cutoff:
+        return f"Past day-trade entry cutoff ({settings.day_trade_entry_cutoff} ET)"
+    return None
+
+
+def _shortable_block_reason(ticker: str) -> str | None:
+    """Alpaca must allow shorting the account and the stock must be shortable and easy to borrow."""
+    try:
+        from app.services.trading_engine import broker
+        if not broker.get_account().get("shorting_enabled", False):
+            return "Account is not enabled for short selling"
+        flags = broker.get_asset_flags(ticker)
+        if not flags["tradable"]:
+            return f"{ticker} is not tradable"
+        if not flags["shortable"]:
+            return f"{ticker} is not shortable"
+        if not flags["easy_to_borrow"]:
+            return f"{ticker} is hard to borrow"
+    except Exception as e:
+        return f"Could not verify shortability for {ticker}: {e}"
+    return None
+
+
 def _closes_position(direction: str, held: dict | None) -> bool:
-    """True when this signal would reduce exposure (sell shares / close an opposite option)."""
+    """True when this signal would reduce exposure (sell a long / cover a short / close an opposite option)."""
     if held is None:
         return False
     if held.get("option_type") is None:
+        if held.get("qty", 0) < 0:
+            return direction == "BUY"      # covering a short
         return direction == "SELL"
     return held["option_type"] != ("call" if direction == "BUY" else "put")
 
@@ -107,6 +157,7 @@ async def execute_signal(
     size_mult:          float = 1.0,
     stop_mult_adj:      float = 0.0,
     bias:               str | None = None,
+    vwap_score:         float | None = None,
 ) -> dict:
     """
     Evaluate a signal through the risk gate and submit an order if approved.
@@ -121,6 +172,8 @@ async def execute_signal(
                              bracket, flattened before the close).
         size_mult:           Market-bias position-size multiplier (bear = 0.5).
         stop_mult_adj:       Market-bias adjustment to the ATR stop multiplier.
+        vwap_score:          Intraday VWAP component; day-trade entries need it above
+                             settings.day_trade_min_vwap.
     """
     result = {"ticker": signal.ticker, "direction": signal.direction, "action": None, "reason": None}
 
@@ -128,12 +181,10 @@ async def execute_signal(
         result.update(action="skip", reason="HOLD signal")
         return result
 
-    is_day = style == "day" and signal.direction == "BUY"
-    if is_day:
+    is_day   = style == "day" and signal.direction == "BUY"
+    is_short = style == "short" and signal.direction == "SELL"
+    if is_day or is_short:
         source = "daytrade"
-    elif settings.day_trade_only and signal.direction == "BUY":
-        result.update(action="skip", reason="Day-trade-only mode: no qualifying intraday setup (no overnight/swing entries)")
-        return result
 
     # ── Risk gate ─────────────────────────────────────────────────────────────
     halted = portfolio_limits.is_halted(equity)
@@ -168,13 +219,27 @@ async def execute_signal(
         result.update(action="skip", reason=f"Circuit breaker tripped ({reason}) — no new entries")
         return result
 
+    covering_short = (held is not None and held.get("option_type") is None
+                      and held.get("qty", 0) < 0 and signal.direction == "BUY")
+
+    # Day-trade-only: no overnight/swing ENTRIES (covering a short is an exit, always allowed)
+    if (settings.day_trade_only and signal.direction == "BUY" and not is_day and not covering_short):
+        result.update(action="skip", reason="Day-trade-only mode: no qualifying intraday setup (no overnight/swing entries)")
+        return result
+
     if is_day and held is None:
-        block = _day_entry_block_reason(quant_score, datetime.now(ZoneInfo("America/New_York")))
+        block = _day_entry_block_reason(quant_score, datetime.now(ZoneInfo("America/New_York")), vwap_score)
         if block:
             result.update(action="skip", reason=block)
             return result
 
-    if is_day and held is None and not _pdt_allows_day_trade(equity):
+    if is_short and held is None and not settings.enable_options_trading:
+        block = _short_entry_block_reason(quant_score, datetime.now(ZoneInfo("America/New_York")), vwap_score)
+        if block:
+            result.update(action="skip", reason=block)
+            return result
+
+    if (is_day or is_short) and held is None and not _pdt_allows_day_trade(equity):
         result.update(action="skip", reason="Pattern-day-trader limit: 3 day trades used and equity < $25k")
         return result
 
@@ -183,18 +248,35 @@ async def execute_signal(
 
     side = "buy" if signal.direction == "BUY" else "sell"
 
+    # ── Exits: sell a long / cover a short ────────────────────────────────────
+    # Close the WHOLE position (never size it like an entry — a 27-share sizing on a 4-share
+    # holding was rejected every scan) and cancel its stop/bracket orders first so the shares
+    # aren't held for them. No protective stop is attached to an exit.
+    if held is not None and _closes_position(signal.direction, held):
+        return await _close_position(signal, held, source, quant_score)
+
     if side == "buy" and held is not None:
         result.update(action="skip", reason="Already holding position — skipping duplicate BUY")
         return result
 
-    if side == "sell" and held is None:
-        result.update(action="skip", reason="No position to sell — skipping SELL (no short-selling)")
+    if side == "sell" and held is not None:
+        result.update(action="skip", reason="Already short — skipping duplicate SHORT")
         return result
+
+    if side == "sell" and held is None and not is_short:
+        result.update(action="skip", reason="No position to sell — SELL only opens a short on a bear-market short setup")
+        return result
+
+    if is_short:
+        block = _shortable_block_reason(signal.ticker)
+        if block:
+            result.update(action="skip", reason=block)
+            return result
 
     atr      = stop_loss.calculate_atr(signal.ticker)
     risk_pct = get_param("risk_per_trade_pct") * size_mult
-    if is_day:
-        # Day trade: stop ~0.6 ATR (roughly half a day's range), target 2R
+    if is_day or is_short:
+        # Day trade (long or short): stop ~0.6 ATR (roughly half a day's range), target 2R
         from app.services.adaptive.daily_learner import get_day_params
         dp = get_day_params()          # learned nightly; defaults are DAY_STOP_ATR / DAY_REWARD_RISK
         stop_mult, target_mult = dp["stop_atr"], dp["stop_atr"] * dp["reward_risk"]
@@ -233,11 +315,11 @@ async def execute_signal(
         stop_side  = "sell" if side == "buy" else "buy"
 
         order = None
-        if is_day and atr > 0:
+        if (is_day or is_short) and atr > 0:
             target = stop_loss.atr_target_price(price, atr, target_mult, side)
             try:
-                order = broker.submit_bracket_order(signal.ticker, qty, stop_price, target)
-                logger.info(f"[DAYTRADE] Bracket submitted {signal.ticker} x{qty} stop={stop_price} tp={target}")
+                order = broker.submit_bracket_order(signal.ticker, qty, stop_price, target, side=side)
+                logger.info(f"[DAYTRADE] {'SHORT' if is_short else 'LONG'} bracket submitted {signal.ticker} x{qty} stop={stop_price} tp={target}")
             except Exception as e:
                 logger.warning(f"Bracket order failed for {signal.ticker} ({e}) — falling back to market+stop")
                 order = None
@@ -253,12 +335,12 @@ async def execute_signal(
             quant_score=quant_score,
         )
 
-        if is_day:
+        if is_day or is_short:
             from app.services.trading_engine import day_journal
             await day_journal.open_trade(
                 signal.ticker, qty, price, stop_price,
                 stop_loss.atr_target_price(price, atr, target_mult, side) if atr > 0 else None,
-                bias=bias, quant_score=quant_score,
+                bias=bias, quant_score=quant_score, side="short" if is_short else "long",
             )
 
         result.update(action="submitted", order=str(order), stop_price=stop_price)
@@ -266,6 +348,38 @@ async def execute_signal(
         logger.error(f"Order submission failed for {signal.ticker}: {e}")
         result.update(action="error", reason=str(e))
 
+    return result
+
+
+async def _close_position(signal: CompositeSignal, held: dict, source: str, quant_score: float | None) -> dict:
+    """
+    Exit a position completely: cancel every open order on the symbol (stop / bracket legs
+    reserve the shares), then liquidate the whole position at market. Used for SELL on a
+    long and BUY on a short.
+    """
+    result = {"ticker": signal.ticker, "direction": signal.direction, "action": None, "reason": None}
+    qty = abs(held["qty"])
+    is_short = held["qty"] < 0
+    close_side = "buy" if is_short else "sell"
+    price = held.get("current_price") or 0.0
+
+    if _dry_run:
+        logger.info(f"[DRY RUN] Would {'COVER' if is_short else 'SELL'} entire {signal.ticker} position ({qty} shares)")
+        result.update(action="dry_run", qty=qty, price=price, reason="close whole position")
+        return result
+
+    try:
+        from app.services.trading_engine import broker
+        await asyncio.to_thread(broker.flatten_symbol, signal.ticker)
+        logger.info(f"[{source.upper()}] Closed {signal.ticker}: {close_side} {qty} (whole position)")
+        await _save_order(
+            ticker=signal.ticker, side=close_side, qty=qty, price=price, stop_price=None,
+            signal_id=None, source=source, quant_score=quant_score,
+        )
+        result.update(action="submitted", qty=qty, reason=f"closed whole position ({'cover' if is_short else 'sell'})")
+    except Exception as e:
+        logger.error(f"Close failed for {signal.ticker}: {e}")
+        result.update(action="error", reason=str(e))
     return result
 
 

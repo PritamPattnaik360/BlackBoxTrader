@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, TrendingUp, BookOpen, Zap, FlaskConical, Settings } from 'lucide-react'
+import { LayoutDashboard, TrendingUp, BookOpen, Zap, FlaskConical, Settings, Timer } from 'lucide-react'
 
 const links = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/portfolio', label: 'Portfolio', icon: TrendingUp },
   { to: '/orders', label: 'Orders', icon: BookOpen },
+  { to: '/day-trading', label: 'Day Trading', icon: Timer },
   { to: '/signals', label: 'Signals', icon: Zap },
   { to: '/backtest', label: 'Backtest', icon: FlaskConical },
   { to: '/settings', label: 'Settings', icon: Settings },

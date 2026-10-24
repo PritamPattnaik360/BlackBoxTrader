@@ -58,7 +58,20 @@ async def _build_scan_list(market_open: bool) -> tuple[list[str], dict]:
     return tickers, picks
 
 
+_scan_lock = asyncio.Lock()
+
+
 async def run_signal_scan():
+    """Run one scan. Single-flight: the scheduler, "Scan Now" and anything else share this lock,
+    so two scans can never overlap and race to place duplicate orders."""
+    if _scan_lock.locked():
+        logger.warning("Signal scan already running - skipping this request")
+        return
+    async with _scan_lock:
+        await _run_signal_scan()
+
+
+async def _run_signal_scan():
     from app.services.strategy import market_bias
 
     logger.info("Running signal scan...")
@@ -164,12 +177,13 @@ async def run_signal_scan():
                     size_mult=quant.size_mult,
                     stop_mult_adj=quant.stop_mult_adj,
                     bias=quant.bias,
+                    vwap_score=quant.components.get("intraday_vwap"),
                 )
                 action = exec_result.get("action")
                 logger.info(f"Auto-execute {ticker}: {action} ({exec_result.get('reason', '')})")
                 if action in ("submitted", "dry_run"):
                     trades_submitted += 1
-                    if quant.direction == "BUY":
+                    if quant.direction == "BUY" or quant.trade_style == "short":
                         open_count += 1   # keep the position-count gate honest within one scan
 
             elif autonomous and not market_open and quant.direction != "HOLD":
@@ -221,6 +235,7 @@ async def run_signal_scan():
             style=best_quant.trade_style,
             bias=best_quant.bias,
             stop_mult_adj=best_quant.stop_mult_adj,
+            vwap_score=best_quant.components.get("intraday_vwap"),
         )
         logger.info(
             f"[LEARNING] Forced trade result: {exec_result.get('action')} "

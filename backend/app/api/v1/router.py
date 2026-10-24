@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import portfolio, orders, signals, watchlist, market_data, backtest, analytics, settings, adaptive, advisor, strategy
+from app.api.v1 import portfolio, orders, signals, watchlist, market_data, backtest, analytics, settings, adaptive, advisor, strategy, day_trading, trading_config
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(portfolio.router)
@@ -13,3 +13,5 @@ router.include_router(settings.router)
 router.include_router(adaptive.router)
 router.include_router(advisor.router)
 router.include_router(strategy.router)
+router.include_router(day_trading.router)
+router.include_router(trading_config.router)

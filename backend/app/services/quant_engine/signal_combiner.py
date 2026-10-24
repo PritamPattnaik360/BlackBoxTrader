@@ -219,6 +219,14 @@ async def analyze(ticker: str, nlp_score: float, nlp_confidence: float) -> Quant
               and (breakout_confirmed or bias == "bear")):
             trade_style = "day"
 
+    # Bear market: a SELL signal with a live negative intraday read (breakdown below the
+    # opening range / VWAP, or a fade of an overbought rip) is a SHORT day trade. The executor
+    # applies the strict mirrored gates (score, VWAP, cutoff, shortable, PDT) before acting.
+    if direction == "SELL" and bias == "bear" and intraday_active and intraday_score < 0             and _in_day_trade_window():
+        from app.config import settings as _cfg
+        if _cfg.enable_short_day_trades and not _cfg.enable_options_trading:
+            trade_style = "short"
+
     active_scores = [nlp_score, mom_score, mr_score, tech_score]
     if intraday_active:
         active_scores.append(intraday_score)

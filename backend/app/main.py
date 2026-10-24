@@ -56,6 +56,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Adaptive params not loaded (will use defaults): {e}")
 
+    # Re-apply trading settings saved from the Settings page (they override backend/.env)
+    try:
+        from app.services.runtime_settings import apply_overrides
+        apply_overrides()
+    except Exception as e:
+        logger.warning(f"Saved trading settings not applied: {e}")
+
     # Seed default watchlist if empty, then start market data stream
     try:
         tickers = await _seed_watchlist_if_empty()

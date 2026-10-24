@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # existing 15:30 window end; tighten it only if more data shows late entries losing.
     day_trade_min_score: float = 0.30
     day_trade_entry_cutoff: str = "15:30"   # ET, HH:MM; no new day-trade entries after this
+    # VWAP confirmation: intraday_vwap is tanh(30 x % above session VWAP), so 0.35 means price
+    # is ~1.2%+ above VWAP. Journal 2026-10-09..22 (score >= 0.30): below it 46% wins and
+    # -$291; at/above it 65% wins and +$2,103.
+    day_trade_min_vwap: float = 0.35
 
     # Force one small trade per scan when nothing qualifies, to seed learning outcomes.
     # Off by default: those sub-threshold trades were the biggest P&L drain.
@@ -88,6 +92,13 @@ class Settings(BaseSettings):
     # Nightly self-learning (component weights + day-trade stop/target tuning).
     # See app/services/adaptive/daily_learner.py. Set LEARNING_ENABLED=false to freeze the algos.
     learning_enabled: bool = True
+
+    # Short-selling day trades in BEARISH markets. When the market bias is "bear", strong
+    # intraday breakdowns are shorted (stop above, take-profit below, covered by 15:50 ET) and
+    # a bounce is never held overnight. Needs an Alpaca account with shorting enabled and a
+    # shortable, easy-to-borrow stock. In LIVE mode it also needs ALLOW_SHORT_LIVE=true.
+    enable_short_day_trades: bool = True
+    allow_short_live: bool = False
 
     # Autonomous trading — set AUTO_START_AUTONOMOUS=true in .env to enable on boot
     auto_start_autonomous: bool = False
