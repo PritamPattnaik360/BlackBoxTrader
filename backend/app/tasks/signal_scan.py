@@ -178,6 +178,7 @@ async def _run_signal_scan():
                     stop_mult_adj=quant.stop_mult_adj,
                     bias=quant.bias,
                     vwap_score=quant.components.get("intraday_vwap"),
+                    components=quant.components,
                 )
                 action = exec_result.get("action")
                 logger.info(f"Auto-execute {ticker}: {action} ({exec_result.get('reason', '')})")
@@ -236,6 +237,7 @@ async def _run_signal_scan():
             bias=best_quant.bias,
             stop_mult_adj=best_quant.stop_mult_adj,
             vwap_score=best_quant.components.get("intraday_vwap"),
+            components=best_quant.components,
         )
         logger.info(
             f"[LEARNING] Forced trade result: {exec_result.get('action')} "

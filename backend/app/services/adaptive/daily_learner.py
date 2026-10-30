@@ -103,6 +103,11 @@ def get_day_params() -> dict:
     return _state_cached()["day"]
 
 
+def get_avoid_hours() -> list[int]:
+    """Entry hours (ET) the nightly pattern review found to be losing (empty until validated)."""
+    return list(_state_cached().get("avoid_hours", []))
+
+
 def reset() -> None:
     save_state(_empty_state())
     _cached["state"] = None
@@ -342,6 +347,19 @@ async def _learn_day_params(state: dict, report: list[str]) -> None:
                "held": r.held_minutes or 0, "day": _day(r)} for r in rows if r.pnl is not None]
     state["day"], notes = tune_day_params(state["day"], trades)
     report.extend(notes)
+
+    from app.services.adaptive import patterns
+    today = datetime.now(ET).date().isoformat()
+    report.extend(patterns.post_mortem([
+        {"ticker": r.ticker, "pnl": r.pnl, "entry_price": r.entry_price, "stop_price": r.stop_price,
+         "held": r.held_minutes or 0, "score": r.quant_score}
+        for r in rows if r.exit_reason == "stop" and r.pnl is not None and _day(r) == today]))
+    report_p = patterns.analyze(patterns.trade_dicts(rows))
+    hours = patterns.avoid_hours(report_p)
+    if hours != state.get("avoid_hours", []):
+        report.append(f"pattern review: avoid entry hours {hours or 'none'} "
+                      f"(was {state.get('avoid_hours', []) or 'none'}; {report_p['n']} trades)")
+    state["avoid_hours"] = hours
 
 
 async def run_daily_learning(dry_run: bool = False) -> dict:

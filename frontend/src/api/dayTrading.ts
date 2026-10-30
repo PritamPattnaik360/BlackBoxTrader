@@ -72,3 +72,26 @@ export interface DayTradingOverview {
 }
 
 export const getDayTrading = () => api.get<DayTradingOverview>('/day-trading').then((r) => r.data)
+
+export interface PatternBucket {
+  dim: 'hour' | 'score' | 'bias' | 'side' | 'ticker' | 'rvol' | 'vix'
+  bucket: string
+  n: number
+  wins: number
+  win_rate: number
+  net: number
+  avg: number
+  train_avg: number
+  test_avg: number
+  test_n: number
+  avoid: boolean
+}
+export interface PatternReport {
+  n: number
+  with_features: number
+  min_bucket: number
+  buckets: PatternBucket[]
+  avoid: PatternBucket[]
+  blocked_hours: number[]
+}
+export const getPatterns = () => api.get<PatternReport>('/day-trading/patterns').then((r) => r.data)

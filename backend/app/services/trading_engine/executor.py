@@ -66,6 +66,35 @@ def _day_entry_block_reason(quant_score: float | None, now_et: datetime,
     return None
 
 
+def _pattern_block_reason(now_et: datetime) -> str | None:
+    """Learned rule: skip entry hours that lost money in both the older and the recent trades."""
+    if not settings.learning_enabled:
+        return None
+    from app.services.adaptive.daily_learner import get_avoid_hours
+    if now_et.hour in get_avoid_hours():
+        return f"Learned pattern: day trades opened in the {now_et.hour:02d}:00 ET hour have been losing"
+    return None
+
+
+def _entry_features(components: dict | None, vwap_score: float | None, size_mult: float, style: str) -> dict:
+    """Market/signal state at the moment of entry, stored on the journal row for pattern learning."""
+    c = components or {}
+    keep = ("mode", "nlp", "momentum", "mean_reversion", "technical", "llm", "intraday", "intraday_vwap",
+            "intraday_orb", "intraday_momentum", "intraday_fade", "rvol", "trendlines", "trendline_dir",
+            "breakout_mode", "buy_threshold", "sell_threshold")
+    f = {k: c[k] for k in keep if k in c}
+    f.update(vwap_score=vwap_score, size_mult=size_mult, style=style)
+    try:
+        from app.services.strategy import market_bias
+        ctx = market_bias.get_context() if hasattr(market_bias, "get_context") else {}
+        for k, name in (("vix", "vix"), ("spy_price", "spy_price"), ("score", "market_score")):
+            if ctx.get(k) is not None:
+                f[name] = ctx[k]
+    except Exception:
+        pass
+    return f
+
+
 def _short_entry_block_reason(quant_score: float | None, now_et: datetime,
                               vwap_score: float | None = None) -> str | None:
     """Mirror of _day_entry_block_reason for SHORT day trades: a strong NEGATIVE score and price
@@ -158,6 +187,7 @@ async def execute_signal(
     stop_mult_adj:      float = 0.0,
     bias:               str | None = None,
     vwap_score:         float | None = None,
+    components:         dict | None = None,
 ) -> dict:
     """
     Evaluate a signal through the risk gate and submit an order if approved.
@@ -235,6 +265,15 @@ async def execute_signal(
 
     if is_short and held is None and not settings.enable_options_trading:
         block = _short_entry_block_reason(quant_score, datetime.now(ZoneInfo("America/New_York")), vwap_score)
+        if block:
+            result.update(action="skip", reason=block)
+            return result
+
+    if (is_day or is_short) and held is None:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        from app.services.trading_engine import loss_guard
+        block = (_pattern_block_reason(now_et)
+                 or loss_guard.block_reason(signal.ticker, await loss_guard.recent_stops(), now_et))
         if block:
             result.update(action="skip", reason=block)
             return result
@@ -341,6 +380,7 @@ async def execute_signal(
                 signal.ticker, qty, price, stop_price,
                 stop_loss.atr_target_price(price, atr, target_mult, side) if atr > 0 else None,
                 bias=bias, quant_score=quant_score, side="short" if is_short else "long",
+                features=_entry_features(components, vwap_score, size_mult, style),
             )
 
         result.update(action="submitted", order=str(order), stop_price=stop_price)

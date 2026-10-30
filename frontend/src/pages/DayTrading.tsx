@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import { Timer, Info, CheckCircle2, XCircle, SlidersHorizontal, Trophy, AlertTriangle } from 'lucide-react'
 import { getDayTrading, type PeriodStats, type RuleRow, type DayTradeRow } from '../api/dayTrading'
+import PatternsPanel from '../components/strategy/PatternsPanel'
 import { TradeStripView, TradeTimeline, TradePnlBars, PnlHistogram, TradeRangeBars } from '../components/strategy/TradeVisuals'
 
 const usd = (v: number | null | undefined, signed = false) =>
@@ -222,6 +223,7 @@ export default function DayTrading() {
           <div className="text-xs text-gray-500 mb-3">Last 12 trades — how close each came to its stop or its profit target.</div>
           <TradeRangeBars trades={data.trades} />
         </div>
+        <PatternsPanel />
       </div>
 
       {/* How trades end + tickers */}

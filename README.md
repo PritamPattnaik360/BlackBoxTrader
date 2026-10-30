@@ -302,6 +302,8 @@ Exits (SELL on a long, BUY on a short) always close the **whole** position: open
 
 ## Nightly self-learning
 
+**Pattern learning.** Every new day trade stores a snapshot of its entry conditions (signal components, relative volume, VWAP score, VIX, market score). The nightly review breaks closed trades down by entry hour, score band, bias, side, ticker, RVOL and VIX (shown on the Day Trading page). A group needs 20+ trades to appear, and an entry hour is only blocked if it lost money in both the older 70% and the latest 30% of trades (at most 2 hours, re-checked nightly). It is switched off together with nightly learning (`LEARNING_ENABLED=false`).
+
 Every weekday at 16:30 ET (`app/services/adaptive/daily_learner.py`) the bot reviews what actually happened and adjusts itself:
 
 - **Algorithm weights** — each stored signal records the score of every algorithm (intraday, momentum, mean-reversion, technical, trend lines, news). Per market bias (bull/neutral/bear) and mode (daily/intraday) it measures how well each score ranked the forward return and shifts weight toward what worked. Limits: needs 60+ samples over 3+ days, max ±15% change per weight per day, never beyond 0.5×–2× the hand-set default.

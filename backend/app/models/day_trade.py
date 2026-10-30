@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Float, Integer, DateTime, func
+from sqlalchemy import String, Float, Integer, DateTime, JSON, func
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
@@ -26,3 +26,4 @@ class DayTrade(Base):
     bias: Mapped[str | None] = mapped_column(String(8), nullable=True)
     quant_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     held_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    features: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # entry-condition snapshot (pattern learning)

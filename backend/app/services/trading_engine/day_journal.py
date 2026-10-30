@@ -29,13 +29,14 @@ ET = ZoneInfo("America/New_York")
 
 async def open_trade(ticker: str, qty: float, entry_price: float, stop_price: float | None,
                      target_price: float | None, bias: str | None, quant_score: float | None,
-                     contract_symbol: str | None = None, side: str = "long") -> None:
+                     contract_symbol: str | None = None, side: str = "long",
+                     features: dict | None = None) -> None:
     try:
         async with AsyncSessionLocal() as db:
             db.add(DayTrade(
                 ticker=ticker, contract_symbol=contract_symbol, status="open", qty=qty, side=side,
                 entry_price=entry_price, stop_price=stop_price, target_price=target_price,
-                bias=bias, quant_score=quant_score,
+                bias=bias, quant_score=quant_score, features=features,
             ))
             await db.commit()
         logger.info(f"[DAYTRADE] Logged OPEN {side.upper()} {ticker} x{qty} @ {entry_price:.2f} "

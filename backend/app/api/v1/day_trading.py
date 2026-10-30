@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.session import get_db
 from app.models.day_trade import DayTrade
+from app.services.adaptive import patterns
 
 router = APIRouter(prefix="/day-trading", tags=["day-trading"])
 ET = ZoneInfo("America/New_York")
@@ -195,3 +196,13 @@ async def day_trading_overview(limit: int = 300, db: AsyncSession = Depends(get_
         "tickers": {"best": ticker_list[:5], "worst": [r for r in ticker_list[::-1][:5] if r["pnl"] < 0]},
         "trades": [_row(t) for t in rows[:limit]],
     }
+
+
+@router.get("/patterns")
+async def day_trading_patterns(min_n: int = patterns.MIN_BUCKET, db: AsyncSession = Depends(get_db)):
+    """Win rate / P&L by hour, score band, bias, side, ticker, RVOL and VIX, with a held-out check."""
+    from app.services.adaptive.daily_learner import get_avoid_hours
+    rows = (await db.execute(select(DayTrade).where(DayTrade.status == "closed"))).scalars().all()
+    report = patterns.analyze(patterns.trade_dicts(rows), min_n=max(5, min(min_n, 200)))
+    with_features = sum(1 for r in rows if r.features)
+    return {**report, "with_features": with_features, "blocked_hours": get_avoid_hours()}
